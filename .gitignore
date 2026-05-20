@@ -3,3 +3,8 @@
 /PLAN.md
 /PROMPTS.md
 /REPRODUCIBILITY.md
+
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
