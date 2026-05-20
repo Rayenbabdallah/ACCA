@@ -1,0 +1,25 @@
+# ACCA — Requirements
+# Python 3.11
+
+# Core scientific computing
+numpy>=1.26
+scipy>=1.11
+scikit-image>=0.22
+
+# ML (used sparingly — only for optional learned components)
+torch>=2.2
+
+# Testing
+pytest>=8.0
+pytest-timeout>=2.3
+
+# Code quality
+black>=24.0
+ruff>=0.4
+
+# Analysis and figures (experiments/ and paper/ only, NOT in src/ or kaggle/)
+matplotlib>=3.8
+pandas>=2.1
+
+# Utilities
+tqdm>=4.66
