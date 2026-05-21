@@ -1,7 +1,7 @@
 # Makefile — ACCA Project
 # ARC Prize 2026
 
-.PHONY: setup test eval-synthetic eval-ablations eval-universality figures kaggle-test clean
+.PHONY: setup test eval-synthetic eval-ablations eval-universality figures kaggle-test kaggle-test-v1 clean
 
 setup:
 	python -m venv .venv
@@ -36,8 +36,11 @@ figures:
 	@echo "Figures saved to paper/figures/"
 
 kaggle-test:
-	jupyter nbconvert --to notebook --execute kaggle/submission_final.ipynb \
-		--output kaggle/submission_final_executed.ipynb
+	$(MAKE) kaggle-test-v1
+
+kaggle-test-v1:
+	ACCA_LOCAL_SMOKE=1 jupyter nbconvert --to notebook --execute kaggle/submission_v1.ipynb \
+		--output kaggle/submission_v1_executed.ipynb
 	@echo "Kaggle notebook executed successfully"
 
 verify-synthetic-envs:
