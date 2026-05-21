@@ -275,6 +275,8 @@ class KaggleACCAAgent(_OfficialAgent):
         self.agent: ACCAAgent | None = None
         self.game_id: str | None = None
         self.last_action: str | None = None
+        self.probe_step = 0
+        self.click_targets: list[tuple[int, int]] = []
 
     def main(self) -> None:
         """Run one ARC-AGI-3 environment without depending on official Swarm."""
@@ -330,6 +332,14 @@ class KaggleACCAAgent(_OfficialAgent):
     def choose_action(self, frames: list[Any], latest_frame: Any):
         grid = _extract_grid(latest_frame)
         game_id = _extract_game_id(latest_frame)
+        status = _extract_status(latest_frame).upper()
+        action_space = _extract_action_space(latest_frame)
+        if status in {"GAME_OVER", "NOT_PLAYED"}:
+            self.agent = None
+            self.probe_step = 0
+            self.click_targets = []
+            self.last_action = "RESET"
+            return _to_game_action("RESET")
         if self.agent is None or self.game_id != game_id:
             self.game_id = game_id
             self.agent = ACCAAgent(game_id=game_id, memory=self.memory)
@@ -337,15 +347,68 @@ class KaggleACCAAgent(_OfficialAgent):
                 {
                     "game_id": game_id,
                     "initial_grid": grid,
-                    "action_space": _extract_action_space(latest_frame),
+                    "action_space": action_space,
                 }
             )
+            self.probe_step = 0
+            self.click_targets = _click_targets(grid)
             self.last_action = "RESET"
             return _to_game_action("RESET")
+
+        probe = self._probe_action(grid, action_space)
+        if probe is not None:
+            self.probe_step += 1
+            self.last_action = probe
+            return _to_game_action(probe)
 
         action = self.agent.act(grid)
         self.last_action = str(action)
         return _to_game_action(self.last_action)
+
+    def _probe_action(self, grid: np.ndarray, action_space: list[str]) -> str | None:
+        simple_actions = [a for a in ("ACTION1", "ACTION2", "ACTION3", "ACTION4", "ACTION5", "ACTION7") if a in action_space]
+        if "ACTION6" in action_space:
+            if not self.click_targets:
+                self.click_targets = _click_targets(grid)
+            if self.probe_step < len(self.click_targets):
+                row, col = self.click_targets[self.probe_step]
+                return f"ACTION6 {row} {col}"
+        if self.probe_step < min(12, len(simple_actions) * 2):
+            return simple_actions[self.probe_step % len(simple_actions)] if simple_actions else None
+        return None
+
+
+def _click_targets(grid: np.ndarray) -> list[tuple[int, int]]:
+    if grid.size == 0:
+        return []
+    height, width = grid.shape
+    targets: list[tuple[int, int]] = []
+    for color in sorted(int(c) for c in np.unique(grid) if int(c) != 0):
+        ys, xs = np.where(grid == color)
+        if len(ys) == 0:
+            continue
+        targets.append((int(np.median(ys)), int(np.median(xs))))
+        if len(ys) <= 16:
+            targets.extend((int(y), int(x)) for y, x in zip(ys, xs))
+    targets.extend(
+        [
+            (height // 2, width // 2),
+            (height // 4, width // 4),
+            (height // 4, (3 * width) // 4),
+            ((3 * height) // 4, width // 4),
+            ((3 * height) // 4, (3 * width) // 4),
+        ]
+    )
+    seen: set[tuple[int, int]] = set()
+    out: list[tuple[int, int]] = []
+    for row, col in targets:
+        row = max(0, min(height - 1, row))
+        col = max(0, min(width - 1, col))
+        target = (row, col)
+        if target not in seen:
+            seen.add(target)
+            out.append(target)
+    return out[:32]
 
 
 def register_acca_agent() -> None:

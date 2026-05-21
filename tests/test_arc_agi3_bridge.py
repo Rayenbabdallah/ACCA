@@ -10,6 +10,7 @@ import numpy as np
 
 from src.arc_agi3_bridge import (
     KaggleACCAAgent,
+    _click_targets,
     _extract_action_space,
     _extract_game_id,
     _extract_grid,
@@ -92,6 +93,24 @@ def test_kaggle_agent_resets_then_returns_actions():
 
     assert agent.choose_action([], frame) == "RESET"
     assert agent.choose_action([frame], frame) == "ACTION6 0 1"
+
+
+def test_kaggle_agent_resets_after_game_over():
+    agent = KaggleACCAAgent()
+    frame = {"grid": [[1]], "game_id": "g", "state": "GAME_OVER", "action_space": ["RESET", "ACTION1"]}
+
+    assert agent.choose_action([], frame) == "RESET"
+    assert agent.agent is None
+
+
+def test_click_targets_include_color_centroids_and_center():
+    grid = np.zeros((8, 8), dtype=np.uint8)
+    grid[1:3, 5:7] = 4
+
+    targets = _click_targets(grid)
+
+    assert targets[0] == (1, 5)
+    assert (4, 4) in targets
 
 
 def test_kaggle_agent_is_done_on_terminal_status():
