@@ -1,0 +1,131 @@
+"""
+test_planner_agent.py - Exploration/exploitation switch and planner tests.
+
+Part of ACCA (Active Causal Compression Agent)
+ARC Prize 2026 . Paper Track
+"""
+from __future__ import annotations
+
+import numpy as np
+
+from src.agent import ACCAAgent
+from src.hypothesis.goal_inference import ReachPositionGoal
+from src.hypothesis.hypothesis_bank import HypothesisBank
+from src.hypothesis.mechanic_dsl import ActionIsCondition, CausalRule, Hypothesis, MoveEffect
+from src.perception.event_extractor import ActionEnum
+from src.perception.frame_parser import ObjectGraph, ObjectNode
+from src.planning.planner import Planner
+
+
+def _node(left: int = 1) -> ObjectNode:
+    pixels = frozenset({(1, left), (1, left + 1), (2, left), (2, left + 1)})
+    return ObjectNode(
+        obj_id=0,
+        color=3,
+        bbox=(left, 1, left + 1, 2),
+        centroid=(left + 0.5, 1.5),
+        area=4,
+        pixels=pixels,
+    )
+
+
+def _graph(left: int = 1) -> ObjectGraph:
+    node = _node(left)
+    return ObjectGraph(nodes={0: node}, edges=[], frame_index=0)
+
+
+def _frame(left: int = 1) -> np.ndarray:
+    frame = np.zeros((8, 8), dtype=np.uint8)
+    frame[1:3, left : left + 2] = 3
+    return frame
+
+
+def _push_right_hypothesis() -> Hypothesis:
+    return Hypothesis([CausalRule([ActionIsCondition(ActionEnum.ACTION2)], [MoveEffect(0, 1, 0)])])
+
+
+class FixedEIG:
+    def __init__(self, action):
+        self.action = action
+        self.calls = 0
+
+    def select_action(self, state, bank, action_space):
+        self.calls += 1
+        return self.action
+
+
+def test_planner_compiles_reach_position_plan():
+    planner = Planner(max_depth=5)
+    goal = ReachPositionGoal(obj_id=0, target=(3.5, 1.5))
+
+    plan = planner.compile_plan(
+        _graph(left=1),
+        _push_right_hypothesis(),
+        goal,
+        [ActionEnum.ACTION2],
+    )
+
+    assert plan == [ActionEnum.ACTION2, ActionEnum.ACTION2]
+
+
+def test_planner_returns_none_when_goal_unreachable():
+    planner = Planner(max_depth=2)
+    goal = ReachPositionGoal(obj_id=0, target=(6.5, 1.5))
+
+    plan = planner.compile_plan(
+        _graph(left=1),
+        _push_right_hypothesis(),
+        goal,
+        [ActionEnum.ACTION2],
+    )
+
+    assert plan is None
+
+
+def test_agent_uses_eig_while_entropy_high():
+    agent = ACCAAgent()
+    agent.reset({"initial_grid": _frame(1), "action_space": ["ACTION1", "ACTION2"]})
+    agent.eig_selector = FixedEIG("ACTION1")
+
+    action = agent.step(_frame(1))
+
+    assert action == "ACTION1"
+    assert agent.eig_selector.calls == 1
+
+
+def test_agent_switches_to_planner_when_entropy_low():
+    agent = ACCAAgent()
+    agent.reset({"initial_grid": _frame(1), "action_space": [ActionEnum.ACTION2]})
+    h = _push_right_hypothesis()
+    agent.bank = HypothesisBank(seed_hypotheses=[h])
+    agent.goal_inference.goals = [ReachPositionGoal(obj_id=0, target=(2.5, 1.5))]
+    agent.eig_selector = FixedEIG(ActionEnum.ACTION1)
+
+    action = agent.step(_frame(1))
+
+    assert action == ActionEnum.ACTION2
+    assert agent.eig_selector.calls == 0
+
+
+def test_agent_falls_back_to_eig_when_no_plan():
+    agent = ACCAAgent()
+    agent.reset({"initial_grid": _frame(1), "action_space": [ActionEnum.ACTION2]})
+    agent.bank = HypothesisBank(seed_hypotheses=[_push_right_hypothesis()])
+    agent.goal_inference.goals = [ReachPositionGoal(obj_id=0, target=(7.5, 1.5))]
+    agent.planner = Planner(max_depth=1)
+    agent.eig_selector = FixedEIG(ActionEnum.ACTION2)
+
+    action = agent.step(_frame(1))
+
+    assert action == ActionEnum.ACTION2
+    assert agent.eig_selector.calls == 1
+
+
+def test_agent_on_level_complete_updates_goal_confidence():
+    agent = ACCAAgent()
+    agent.reset({"initial_grid": _frame(1), "action_space": [ActionEnum.ACTION2]})
+    agent.bank = HypothesisBank(seed_hypotheses=[_push_right_hypothesis()])
+
+    agent.on_level_complete(_frame(2), success=True)
+
+    assert any(goal.confidence > 0.5 for goal in agent.goal_inference.goals)
