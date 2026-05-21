@@ -1,10 +1,19 @@
 # ACCA — Requirements
 # Python 3.11
+#
+# Kaggle note: arc-agi MUST be installed from the provided arc_agi_3_wheels/
+# directory at competition runtime (no internet). See CLAUDE.md "Kaggle
+# Submission Constraints" for the offline-install snippet. Do NOT use
+# `pip install arc-agi` in the submitted notebook.
 
 # Core scientific computing
 numpy>=1.26
 scipy>=1.11
 scikit-image>=0.22
+
+# Official ARC-AGI-3 SDK — for LOCAL development only
+# (On Kaggle, install from /kaggle/input/.../arc_agi_3_wheels/*.whl)
+arc-agi>=0.9.3
 
 # ML (used sparingly — only for optional learned components)
 torch>=2.2

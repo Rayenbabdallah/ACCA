@@ -1,9 +1,11 @@
 """
-frame_parser.py — Raw 64x64 ARC-AGI-3 grid -> ObjectGraph.
+frame_parser.py — Raw ARC-AGI-3 grid -> ObjectGraph.
 
 Per-color connected-component labeling yields object nodes; pairwise spatial
-relations (TOUCHING / OVERLAPPING / CONTAINED) yield edges. Target: <50ms on a
-64x64 frame.
+relations (TOUCHING / OVERLAPPING / CONTAINED) yield edges. ARC-AGI-3 grids
+are MAX 64×64 — games use variable smaller grids. The parser reads
+dimensions from `frame.shape`; never hardcode 64. Target: <50ms on a
+worst-case 64×64 frame.
 
 Edge semantics note: a single-layer per-color labeling guarantees distinct
 components have disjoint pixel sets, so the spec's literal pixel-set

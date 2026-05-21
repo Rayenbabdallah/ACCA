@@ -60,7 +60,16 @@ clean:
 	find . -type f -name "*.pyc" -delete
 	find . -type f -name ".DS_Store" -delete
 
+# Install arc-agi SDK from offline wheels (mirrors Kaggle runtime behavior)
+install-offline:
+	pip install data/arc_agi_3_wheels/*.whl
+
+# Run ACCAAgent on the 25 public games locally via the official ARC-AGI-3-Agents framework
+run-acca-public:
+	cd arc-agi-agents && OPERATION_MODE=OFFLINE uv run main.py --agent=acca
+
 # Count words in Kaggle writeup (must be ≤1500)
 wordcount:
 	@wc -w paper/kaggle_writeup.md
 	@echo "Target: ≤1500 words"
+	@echo "WARNING: Paper Track is Hackathon format — ONE submission per team only."

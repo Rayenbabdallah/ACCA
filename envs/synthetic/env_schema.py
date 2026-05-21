@@ -4,6 +4,12 @@ env_schema.py — Synthetic environment dataclass + JSON (de)serialization.
 `goal_state` is included alongside the fields named in the task spec because
 verification requires an explicit target — see verifier.py.
 
+LEGACY (v1) — single-mechanic single-level. Per CORRECTION_PROMPT_FINAL §P0-T2
+and ARC-AGI-3 Tech Report §3.4, the real synthetic suite must be 5 games × 6
+levels × multi-mechanic composition. This schema is kept temporarily as scaffolding
+for early eval-harness work; a v2 schema (`SyntheticGame` with `levels: List[Level]`)
+is the next planned redesign.
+
 Part of ACCA (Active Causal Compression Agent)
 ARC Prize 2026 · Paper Track
 """

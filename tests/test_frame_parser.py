@@ -143,6 +143,15 @@ def test_obj_ids_persist_across_frames():
     assert g2.frame_index == 1
 
 
+@pytest.mark.parametrize("h,w", [(8, 8), (12, 20), (32, 32), (40, 64), (64, 40), (64, 64)])
+def test_variable_grid_dimensions_supported(h, w):
+    f = np.zeros((h, w), dtype=np.uint8)
+    f[1, 1] = 3
+    f[h - 2, w - 2] = 4
+    g = FrameParser().parse(f, 0)
+    assert len(g.nodes) == 2
+
+
 def test_runtime_budget_under_50ms():
     rng = np.random.default_rng(42)
     parser = FrameParser()

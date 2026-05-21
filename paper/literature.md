@@ -7,9 +7,9 @@
 
 ## 1. Rodionov 2026 — *Executable Python World Models for ARC-AGI-3* (arXiv:2605.05138)
 
-**What they do.** Per ARC-AGI-3 task, the system prompts an LLM to emit a Python program representing the inferred world model, validates the program against observed transitions, and iteratively refactors it toward simpler abstractions ("MDL-like" but heuristic — no formal scoring). A scripted controller turns the program into actions. Reports **7/25 fully solved on the public game suite, 6 games >75% RHAE, mean RHAE 32.58%**. This is the main competing baseline in the ARC-AGI-3 paper-track race.
+**What they do.** Per ARC-AGI-3 task, the system prompts an LLM to emit a Python program representing the inferred world model, validates the program against observed transitions, and iteratively refactors it toward simpler abstractions ("MDL-like" but heuristic — no formal scoring). A scripted controller turns the program into actions. Reports **7/25 fully solved on the public game suite, 6 games exceeding 75% RHAE, mean RHAE 32.58%** (Rodionov's RHAE uses the Tech Report's 1.15 cap; the authoritative Kaggle-page cap of 1.0 yields slightly lower numbers). This is the main competing baseline in the ARC-AGI-3 paper-track race.
 
-**Why ACCA differs.** Hypotheses are stored as a *bank of typed DSL programs* with an exact Bayesian posterior under a formal MDL prior, not as a single LLM-emitted Python file. Action selection is *actively probing* via Expected Information Gain — Rodionov's controller is a script over a one-shot synthesized model and cannot trade off exploration against exploitation. We pay zero LLM tokens per environment action, which keeps us inside the $0.42/task Kaggle budget by construction.
+**Why ACCA differs.** Hypotheses are stored as a *bank of typed DSL programs* with an exact Bayesian posterior under a formal MDL prior, not as a single LLM-emitted Python file. Action selection is *actively probing* via Expected Information Gain — Rodionov's controller is a script over a one-shot synthesized model and cannot trade off exploration against exploitation. We pay zero LLM tokens per environment action, which keeps us tractable on the no-internet Kaggle runtime where Rodionov's LLM dependency would fail outright.
 
 ---
 
@@ -33,7 +33,7 @@
 
 **What they do.** Alternates an LLM-driven evolutionary search over Python programs with a *hindsight learning* phase that fine-tunes the LLM on (problem, found-solution) pairs harvested from the search itself. Each iteration produces a stronger sampler/refiner LLM. **Solves 52% of the ARC-AGI-1 public test set** at scale.
 
-**Why ACCA differs.** SOAR requires fine-tuning a 32B LLM across generations — incompatible with no-internet Kaggle eval and the $50 compute budget. ACCA's bank-mutation operator (`propose_mutations(h)`) is a deterministic, gradient-free symbolic edit on a 20-token DSL; the equivalent of SOAR's "refinement" runs in microseconds with no GPU. SOAR is also a static-task method — same gap to ARC-AGI-3 as TRM and CompressARC.
+**Why ACCA differs.** SOAR requires fine-tuning a 32B LLM across generations — incompatible with no-internet Kaggle eval (the SDK is installed from offline wheels; outbound network is blocked). ACCA's bank-mutation operator (`propose_mutations(h)`) is a deterministic, gradient-free symbolic edit on a 20-token DSL; the equivalent of SOAR's "refinement" runs in microseconds with no GPU. SOAR is also a static-task method — same gap to ARC-AGI-3 as TRM and CompressARC.
 
 ---
 
@@ -57,7 +57,7 @@
 
 **What they do.** Defines intelligence as **skill-acquisition efficiency** — the rate at which a system learns new competencies, normalized by its priors and training experience. Argues that benchmarks must be grounded in *innate human priors* (Core Knowledge) to fairly compare AI to humans. This paper is the theoretical foundation for the entire ARC benchmark family.
 
-**Why ACCA cites this.** EIG-per-environment-action is a *direct operationalization* of skill-acquisition efficiency: bits of model uncertainty resolved per costly action. RHAE = (human_actions / ai_actions)² further normalizes for the human-prior reference point Chollet specifies. ACCA is, by construction, the agent Chollet's framework predicts: priors over a DSL, posterior updated by observations, decisions selected to maximize information gain per unit experience.
+**Why ACCA cites this.** EIG-per-environment-action is a *direct operationalization* of skill-acquisition efficiency: bits of model uncertainty resolved per costly action. The Kaggle level-score (`min(h/a,1.0)²`) further normalizes for the human-prior reference point Chollet specifies. ACCA is, by construction, the agent Chollet's framework predicts: priors over a DSL, posterior updated by observations, decisions selected to maximize information gain per unit experience.
 
 ---
 

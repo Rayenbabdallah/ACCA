@@ -9,7 +9,15 @@
 
 ACCA is a research system and Kaggle submission targeting **1st place in the ARC Prize 2026 Paper Track** ($50K) and a competitive leaderboard score on the **ARC-AGI-3** interactive benchmark.
 
-ARC-AGI-3 presents an agent with novel, instruction-free interactive environments rendered as 64×64 16-color grids. The agent must discover mechanics, infer goals, and complete levels using as few environment actions as possible. Scoring is **Relative Human Action Efficiency (RHAE)**: `score = (human_actions / AI_actions)²` per level — action waste is penalized quadratically.
+ARC-AGI-3 presents an agent with novel, instruction-free interactive environments rendered as grids of **max 64×64** cells (games use variable smaller sizes) with values 0–15. The agent must discover mechanics, infer goals, and complete levels using as few environment actions as possible.
+
+Scoring follows the Kaggle data page (authoritative):
+```
+level_score = min(human_actions / agent_actions, 1.0)²              # cap = 1.0
+game_score  = Σ (level_index · level_score) / Σ level_indices       # 1-indexed weights
+total_score = mean(game_scores across all 110 competition games)
+```
+Action waste is penalized quadratically; uncompleted levels score 0; later levels dominate (L6 weighs 6× L1).
 
 The Paper Track judges 6 equal criteria: **Accuracy, Universality, Progress, Theory, Completeness, Novelty**. In 2025, the 1st-place paper (TRM, 8% accuracy) beat the highest-scoring Kaggle entry (NVARC, 24% accuracy) because Theory + Novelty + Universality dominate. ACCA is designed to score high on all six.
 
@@ -53,7 +61,7 @@ This is Bayesian experimental design (Chaloner & Verdinelli 1995) applied to an 
 
 | Rubric Criterion | ACCA's Answer |
 |---|---|
-| **Accuracy** | EIG directly optimizes RHAE. Every internal compute cycle spent saves environment actions. |
+| **Accuracy** | EIG directly optimizes level/game/total_score. Every internal compute cycle spent saves environment actions; cross-level memory turns single-level wins into game-level progression. |
 | **Theory** | Formal derivation: MDL prior + Bayesian posterior + EIG = principled Bayesian experimental design. Answers *why* it works, not just how. |
 | **Novelty** | No published system combines typed causal DSL + EIG exploration + cross-level memory as a unified interactive agent. |
 | **Universality** | Same mechanism tested on ARC-AGI-2 via static bridge. MDL/Bayesian framing extends to any novel-mechanic environment. |
@@ -66,7 +74,7 @@ This is Bayesian experimental design (Chaloner & Verdinelli 1995) applied to an 
 
 | Prior Work | What They Do | ACCA's Differentiation |
 |---|---|---|
-| **Rodionov 2026** (arXiv:2605.05138, 32.58% RHAE) | GPT-5 coding agent with informal "refactoring as MDL proxy" heuristics | ACCA uses a **formal** Bayesian posterior over a typed DSL with mathematically grounded MDL prior and principled EIG exploration — not coding-agent heuristics |
+| **Rodionov 2026** (arXiv:2605.05138, mean RHAE 32.58% under Tech-Report cap; lower under Kaggle's 1.0 cap) | GPT-5 coding agent with informal "refactoring as MDL proxy" heuristics; requires LLM at inference | ACCA uses a **formal** Bayesian posterior over a typed DSL with mathematically grounded MDL prior and principled EIG exploration — no LLM in the inner loop, compatible with Kaggle's no-internet runtime |
 | **TRM** (arXiv:2510.04871, 2025 paper 1st) | Tiny recursive model for static ARC prediction | Static predictor with no action interface. ACCA borrows the recursive refinement insight and derives it as approximate Bayesian inference |
 | **CompressARC** (arXiv:2512.06104, 2025 paper 3rd) | MDL via gradient descent on a VAE for static ARC-AGI-2 | Static MDL. ACCA makes MDL **action-selective**: the agent actively chooses interventions to minimize description length, not just gradient-descend on a fixed puzzle |
 | **StochasticGoose / search-only agents** | Discover mechanics by chance via random/heuristic search | EIG exploration discovers mechanics with the **minimum possible** environment actions, directly optimizing RHAE's quadratic penalty |
@@ -226,9 +234,10 @@ arc-acca/
 
 | Metric | Target | Minimum |
 |---|---|---|
-| Mean RHAE on synthetic red-team suite | >20% | >10% |
-| Mean RHAE on Kaggle public demos | >32% (beat Rodionov) | >15% |
-| Ablation delta (full vs no EIG) | >10% RHAE | >5% |
+| Mean total_score on synthetic red-team suite | >20% | >10% |
+| Mean total_score on 25 public demo games | >32% (beat Rodionov) | >15% |
+| Ablation delta (full vs no EIG) | >10% total_score | >5% |
 | ARC-AGI-2 coverage | >40% task types | >20% |
 | Paper Theory score (self-assessed) | 5/5 | 4/5 |
 | Kaggle writeup word count | ≤1,500 | ≤1,500 |
+| Submission count (Hackathon — hard cap) | **1** | **1** |
