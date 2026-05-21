@@ -23,6 +23,7 @@ from src.agent import ACCAAgent, MechanicMemory
 def _add_official_agent_paths() -> None:
     """Expose Kaggle's attached ARC-AGI-3-Agents repo to Python imports."""
     patterns = [
+        "/kaggle/input/competitions/arc-prize-2026-arc-agi-3/ARC-AGI-3-Agents",
         "/kaggle/input/**/ARC-AGI-3-Agents",
         "/kaggle/input/**/ARC-AGI-3-Agents/*",
         "/kaggle/input/**/ARC-AGI-3-Agents/**/*",
@@ -167,7 +168,10 @@ def run_competition() -> None:
     """Run ACCA through the official ARC-AGI-3 Swarm in competition mode."""
     try:
         _add_official_agent_paths()
-        from agents import Swarm
+        try:
+            from agents import Swarm
+        except ImportError:
+            from agents.swarm import Swarm
         from arc_agi_3 import Arcade, OperationMode
     except Exception as exc:  # pragma: no cover - requires Kaggle SDK.
         raise RuntimeError(
