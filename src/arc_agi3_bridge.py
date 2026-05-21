@@ -11,6 +11,8 @@ ARC Prize 2026 . Paper Track
 from __future__ import annotations
 
 import glob
+import importlib
+import types
 import sys
 from pathlib import Path
 from typing import Any, Mapping
@@ -46,6 +48,43 @@ def _add_official_agent_paths() -> None:
                     sys.path.insert(0, str(parent))
 
 
+def _official_agents_root() -> Path | None:
+    candidates = [
+        Path("/kaggle/input/competitions/arc-prize-2026-arc-agi-3/ARC-AGI-3-Agents"),
+    ]
+    candidates.extend(Path(p) for p in glob.glob("/kaggle/input/**/ARC-AGI-3-Agents", recursive=True))
+    candidates.extend(Path(p).parent for p in glob.glob("/kaggle/input/**/agents", recursive=True))
+    for root in candidates:
+        if (root / "agents" / "swarm.py").exists():
+            return root
+    return None
+
+
+def _ensure_lightweight_agents_package(root: Path) -> None:
+    """Register `agents` as a package without executing its heavy __init__.py."""
+    pkg = sys.modules.get("agents")
+    if pkg is None or not hasattr(pkg, "__path__"):
+        pkg = types.ModuleType("agents")
+        pkg.__path__ = [str(root / "agents")]
+        sys.modules["agents"] = pkg
+    elif str(root / "agents") not in pkg.__path__:
+        pkg.__path__.insert(0, str(root / "agents"))
+
+
+def _import_official_agent_base():
+    root = _official_agents_root()
+    if root is not None:
+        _ensure_lightweight_agents_package(root)
+    return importlib.import_module("agents.agent").Agent
+
+
+def _import_official_swarm():
+    root = _official_agents_root()
+    if root is not None:
+        _ensure_lightweight_agents_package(root)
+    return importlib.import_module("agents.swarm").Swarm
+
+
 def _agent_path_diagnostics() -> str:
     candidates: list[str] = []
     for pattern in (
@@ -62,7 +101,7 @@ def _agent_path_diagnostics() -> str:
 
 try:  # Local development does not have the Kaggle SDK installed.
     _add_official_agent_paths()
-    from agents.agent import Agent as _OfficialAgent
+    _OfficialAgent = _import_official_agent_base()
 except Exception:  # pragma: no cover - exercised only when SDK is absent.
     _OfficialAgent = object
 
@@ -168,10 +207,7 @@ def run_competition() -> None:
     """Run ACCA through the official ARC-AGI-3 Swarm in competition mode."""
     try:
         _add_official_agent_paths()
-        try:
-            from agents import Swarm
-        except ImportError:
-            from agents.swarm import Swarm
+        Swarm = _import_official_swarm()
         from arc_agi_3 import Arcade, OperationMode
     except Exception as exc:  # pragma: no cover - requires Kaggle SDK.
         raise RuntimeError(
