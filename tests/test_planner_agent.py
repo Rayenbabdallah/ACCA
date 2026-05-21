@@ -182,9 +182,32 @@ def test_effective_simple_action_avoids_suppressed_family():
     agent.stats.record("ACTION1", changed=True, novel=True)
     agent.stats.record("ACTION2", changed=False, novel=False)
     agent._last_base_action = "ACTION1"
-    agent._base_action_streak = 12
+    agent._base_action_streak = 8
 
     assert agent._effective_simple_action() == "ACTION2"
+
+
+def test_heuristic_push_action_passes_through_burst_suppression():
+    frame = _push_target_frame()
+    agent = ACCAAgent()
+    agent.reset({"initial_grid": frame, "action_space": ["ACTION1", "ACTION2"]})
+    assert agent.prev_tracked is not None
+    agent._last_base_action = "ACTION2"
+    agent._base_action_streak = 8
+
+    assert agent._heuristic_action(agent.prev_tracked) == "ACTION1"
+
+
+def test_coordinate_action_avoids_reclicked_cells():
+    agent = ACCAAgent()
+    agent.reset({"initial_grid": _click_frame(), "action_space": ["ACTION6"]})
+    assert agent.prev_tracked is not None
+
+    first = agent._coordinate_action(agent.prev_tracked)
+    second = agent._coordinate_action(agent.prev_tracked)
+
+    assert first == "ACTION6 2 5"
+    assert second != first
 
 
 def test_agent_switches_to_planner_when_entropy_low():

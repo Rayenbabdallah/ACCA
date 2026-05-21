@@ -419,16 +419,16 @@ class ACCAAgent:
             return learned_action
         push_action = self._push_toward_target_action()
         if push_action is not None:
-            return push_action
+            return self._desuppress_action(push_action)
         program_action = self._program_action()
         if program_action is not None:
-            return program_action
+            return self._desuppress_action(program_action)
         coordinate_action = self._coordinate_action(state)
         if coordinate_action is not None:
             return coordinate_action
         effective_action = self._effective_simple_action()
         if effective_action is not None:
-            return effective_action
+            return self._desuppress_action(effective_action)
         return None
 
     def _state_conditioned_action(self) -> str | None:
@@ -497,12 +497,12 @@ class ACCAAgent:
         push_action = self._push_toward_target_action()
         if push_action is not None:
             self.planner.last_predicted_state = None
-            return push_action
+            return self._desuppress_action(push_action)
 
         program_action = self._program_action()
         if program_action is not None:
             self.planner.last_predicted_state = None
-            return program_action
+            return self._desuppress_action(program_action)
 
         coordinate_action = self._coordinate_action(state)
         if coordinate_action is not None:
@@ -517,7 +517,7 @@ class ACCAAgent:
         effective_action = self._effective_simple_action()
         if effective_action is not None:
             self.planner.last_predicted_state = None
-            return effective_action
+            return self._desuppress_action(effective_action)
 
         if (
             self.bank.entropy() > config.ENTROPY_THRESHOLD
@@ -574,6 +574,11 @@ class ACCAAgent:
         if not eligible:
             self._useless_clicks.clear()
             eligible = list(candidates)
+        untried = [c for c in eligible if c not in self._tried_clicks]
+        if untried:
+            eligible = untried
+        elif self._tried_clicks:
+            self._tried_clicks.clear()
 
         # Rank by lifetime effectiveness. Unseen cells score 2.0 (forced to
         # try once); proven-effective cells score 0..~1.4; thrashed-useless
@@ -614,7 +619,7 @@ class ACCAAgent:
         """
         if base != self._last_base_action:
             return False
-        limit = 16 if base == ActionEnum.ACTION6.value else 12
+        limit = 24 if base == ActionEnum.ACTION6.value else 8
         if self._base_action_streak < limit:
             return False
         return self._alternate_simple_action(exclude=base) is not None
@@ -669,6 +674,16 @@ class ACCAAgent:
                 ((3 * h) // 4, w // 4),
                 ((3 * h) // 4, (3 * w) // 4),
             ])
+            # Coarse whole-board sweep. Production click games have 64x64
+            # boards and may hide the useful target away from visible object
+            # centroids; this gives ACTION6-only games broad coverage within
+            # the 300-action cap instead of repeatedly clicking the same few
+            # clusters.
+            rows = np.linspace(0, max(0, h - 1), num=min(12, h), dtype=int)
+            cols = np.linspace(0, max(0, w - 1), num=min(12, w), dtype=int)
+            for r in rows:
+                for c in cols:
+                    candidates.append((int(r), int(c)))
         seen: set[tuple[int, int]] = set()
         out: list[tuple[int, int]] = []
         for c in candidates:
