@@ -245,6 +245,8 @@ class ACCAAgent:
         self._novel_transitions: Dict[int, set] = {}
         self._play_idx_per_state: Dict[int, int] = {}
         self._current_state_hash: int | None = None
+        self._last_base_action: str | None = None
+        self._base_action_streak = 0
 
     def reset(self, initial: np.ndarray | Mapping[str, Any]) -> None:
         if isinstance(initial, Mapping) and "game_id" in initial:
@@ -288,6 +290,8 @@ class ACCAAgent:
         self._novel_transitions = {}
         self._play_idx_per_state = {}
         self._current_state_hash = None
+        self._last_base_action = None
+        self._base_action_streak = 0
 
     def on_new_level(self) -> None:
         """Bridge calls this when a level transition is detected (grid shape change
@@ -312,6 +316,8 @@ class ACCAAgent:
         )
         self.program_index = 0
         self.program_pos = 0
+        self._last_base_action = None
+        self._base_action_streak = 0
 
     def act(self, observation: np.ndarray) -> ActionEnum | str:
         return self.step(observation)
@@ -409,7 +415,7 @@ class ACCAAgent:
         # a novel state from this exact grid, replay it. This is the highest
         # form of evidence we have — actual observation, not a heuristic guess.
         learned_action = self._state_conditioned_action()
-        if learned_action is not None:
+        if learned_action is not None and not self._base_suppressed(_base_action(learned_action)):
             return learned_action
         push_action = self._push_toward_target_action()
         if push_action is not None:
@@ -420,6 +426,9 @@ class ACCAAgent:
         coordinate_action = self._coordinate_action(state)
         if coordinate_action is not None:
             return coordinate_action
+        effective_action = self._effective_simple_action()
+        if effective_action is not None:
+            return effective_action
         return None
 
     def _state_conditioned_action(self) -> str | None:
@@ -445,6 +454,11 @@ class ACCAAgent:
         action_text = str(action.value if isinstance(action, ActionEnum) else action)
         self.level_actions.append(action_text)
         base = _base_action(action_text)
+        if base == self._last_base_action:
+            self._base_action_streak += 1
+        else:
+            self._last_base_action = base
+            self._base_action_streak = 1
         if base == "RESET":
             self.current_attempt = []
         else:
@@ -476,7 +490,7 @@ class ACCAAgent:
         # Order matters: actual learned evidence first (state-conditioned),
         # then specific game-shape heuristics, then generic click, then EIG.
         learned_action = self._state_conditioned_action()
-        if learned_action is not None:
+        if learned_action is not None and not self._base_suppressed(_base_action(learned_action)):
             self.planner.last_predicted_state = None
             return learned_action
 
@@ -510,7 +524,9 @@ class ACCAAgent:
             and self.actions_taken < config.MAX_EXPLORATION_ACTIONS
         ):
             self.planner.last_predicted_state = None
-            return self.eig_selector.select_action(state, self.bank, self.action_space)
+            return self._desuppress_action(
+                self.eig_selector.select_action(state, self.bank, self.action_space)
+            )
 
         if not self.planner.has_plan():
             goal = self.goal_inference.top_goal()
@@ -522,15 +538,19 @@ class ACCAAgent:
             )
             if plan is None or len(plan) == 0:
                 self.planner.last_predicted_state = None
-                return self.eig_selector.select_action(state, self.bank, self.action_space)
+                return self._desuppress_action(
+                    self.eig_selector.select_action(state, self.bank, self.action_space)
+                )
             self.planner.current_plan = plan
 
         action = self.planner.next_action()
         if action is None:
             self.planner.last_predicted_state = None
-            return self.eig_selector.select_action(state, self.bank, self.action_space)
+            return self._desuppress_action(
+                self.eig_selector.select_action(state, self.bank, self.action_space)
+            )
         self.planner.last_predicted_state = self.bank.map_hypothesis().execute(state, action)
-        return action
+        return self._desuppress_action(action)
 
     def _coordinate_action(self, state: ObjectGraph) -> str | None:
         """Propose one ACTION6 click on a non-background cluster we haven't tried
@@ -538,6 +558,8 @@ class ACCAAgent:
         colors outside our synthetic-env palette, so the prior color-14/15 filter
         never fired in production."""
         if not any(_base_action(action) == ActionEnum.ACTION6.value for action in self.action_space):
+            return None
+        if self._base_suppressed(ActionEnum.ACTION6.value):
             return None
 
         candidates = self._click_candidates(state)
@@ -578,7 +600,43 @@ class ACCAAgent:
             return None
         if not any(self.stats.action_calls.get(a, 0) > 0 for a in simple):
             return None
+        unsuppressed = [a for a in simple if not self._base_suppressed(a)]
+        if unsuppressed:
+            simple = unsuppressed
         return max(simple, key=self.stats.action_score)
+
+    def _base_suppressed(self, base: str) -> bool:
+        """Temporarily suppress an action family after a long same-action burst.
+
+        Kaggle logs showed whole environments consumed by ACTION1 or ACTION6.
+        A cap forces the policy to sample another available family before it
+        spends the remaining budget on the same local optimum.
+        """
+        if base != self._last_base_action:
+            return False
+        limit = 16 if base == ActionEnum.ACTION6.value else 12
+        if self._base_action_streak < limit:
+            return False
+        return self._alternate_simple_action(exclude=base) is not None
+
+    def _alternate_simple_action(self, exclude: str | None = None) -> str | None:
+        candidates = [
+            _base_action(action)
+            for action in self.action_space
+            if _base_action(action) not in ("RESET", ActionEnum.ACTION6.value, exclude)
+        ]
+        candidates = sorted(set(a for a in candidates if a))
+        if not candidates:
+            return None
+        return min(candidates, key=lambda a: self.stats.action_calls.get(a, 0))
+
+    def _desuppress_action(self, action: ActionEnum | str) -> ActionEnum | str:
+        action_text = str(action.value if isinstance(action, ActionEnum) else action)
+        base = _base_action(action_text)
+        if not self._base_suppressed(base):
+            return action
+        alternate = self._alternate_simple_action(exclude=base)
+        return action if alternate is None else alternate
 
     def _click_candidates(self, state: ObjectGraph) -> list[tuple[int, int]]:
         """Click candidates: every non-bg cluster's centroid, plus individual

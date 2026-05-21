@@ -129,6 +129,32 @@ def test_kaggle_agent_is_done_on_terminal_status():
     assert not agent.is_done([], {"grid": [[0]], "state": "NOT_FINISHED"})
 
 
+def test_kaggle_agent_respects_max_actions_without_off_by_one(monkeypatch):
+    class FakeEnv:
+        def __init__(self):
+            self.calls = 0
+            self.observation_space = {
+                "grid": [[0, 1], [0, 0]],
+                "game_id": "g",
+                "state": "NOT_FINISHED",
+                "action_space": ["ACTION6"],
+            }
+
+        def step(self, action, data=None, reasoning=None):
+            self.calls += 1
+            return self.observation_space
+
+    monkeypatch.setenv("ACCA_QUIET", "1")
+    env = FakeEnv()
+    agent = KaggleACCAAgent(arc_env=env)
+    agent.MAX_ACTIONS = 2
+
+    agent.main()
+
+    assert env.calls == 2
+    assert agent.action_counter == 2
+
+
 def test_game_id_of_environment_object():
     env = type("Env", (), {"game_id": "sk48-d8078629"})()
 

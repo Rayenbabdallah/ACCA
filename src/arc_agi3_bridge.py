@@ -329,7 +329,7 @@ class KaggleACCAAgent(_OfficialAgent):
         game_t0 = time.perf_counter()
         cum_choose = 0.0
         cum_step = 0.0
-        while not self.is_done(self.frames, latest_frame) and self.action_counter <= self.MAX_ACTIONS:
+        while not self.is_done(self.frames, latest_frame) and self.action_counter < self.MAX_ACTIONS:
             t0 = time.perf_counter()
             action = self.choose_action(self.frames, latest_frame)
             t1 = time.perf_counter()
@@ -548,7 +548,7 @@ class RandomClickAgent(_OfficialAgent):
         if not getattr(self, "frames", None):
             self.frames = [latest_frame]
         self.action_counter = int(getattr(self, "action_counter", 0))
-        while not self.is_done(self.frames, latest_frame) and self.action_counter <= self.MAX_ACTIONS:
+        while not self.is_done(self.frames, latest_frame) and self.action_counter < self.MAX_ACTIONS:
             action = self.choose_action(self.frames, latest_frame)
             frame = self._take_arc_action(action)
             if frame is not None:

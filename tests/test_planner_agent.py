@@ -166,6 +166,27 @@ def test_agent_canonicalizes_numeric_action_space():
     assert agent.action_space == ["ACTION1", "ACTION6", "RESET"]
 
 
+def test_agent_suppresses_long_same_action_bursts():
+    agent = ACCAAgent()
+    agent.reset({"initial_grid": _frame(1), "action_space": ["ACTION1", "ACTION2"]})
+    agent._last_base_action = "ACTION1"
+    agent._base_action_streak = 12
+
+    assert agent._base_suppressed("ACTION1")
+    assert agent._alternate_simple_action(exclude="ACTION1") == "ACTION2"
+
+
+def test_effective_simple_action_avoids_suppressed_family():
+    agent = ACCAAgent()
+    agent.reset({"initial_grid": _frame(1), "action_space": ["ACTION1", "ACTION2"]})
+    agent.stats.record("ACTION1", changed=True, novel=True)
+    agent.stats.record("ACTION2", changed=False, novel=False)
+    agent._last_base_action = "ACTION1"
+    agent._base_action_streak = 12
+
+    assert agent._effective_simple_action() == "ACTION2"
+
+
 def test_agent_switches_to_planner_when_entropy_low():
     agent = ACCAAgent()
     agent.reset({"initial_grid": _frame(1), "action_space": [ActionEnum.ACTION2]})
