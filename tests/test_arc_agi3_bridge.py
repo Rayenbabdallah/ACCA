@@ -43,6 +43,14 @@ def test_extract_grid_reduces_channel_first_stack():
     assert grid.tolist() == [[3, 1], [2, 4]]
 
 
+def test_extract_grid_tolerates_empty_official_frame():
+    frame = {"frame": []}
+
+    grid = _extract_grid(frame)
+
+    assert grid.tolist() == [[0]]
+
+
 def test_extract_metadata_defaults_and_values():
     frame = {"grid": [[0]], "game_id": "game-a", "action_space": ["RESET", "ACTION1"]}
 

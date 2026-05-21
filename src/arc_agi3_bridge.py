@@ -164,6 +164,8 @@ def _extract_grid(frame: Any) -> np.ndarray:
     if grid is None:
         raise ValueError("could not extract grid from ARC-AGI-3 frame")
     arr = np.asarray(grid, dtype=np.uint8)
+    if arr.size == 0:
+        return np.zeros((1, 1), dtype=np.uint8)
     if arr.ndim == 3 and arr.shape[0] == 1:
         arr = arr[0]
     if arr.ndim == 3 and arr.shape[0] in (2, 3, 4):
