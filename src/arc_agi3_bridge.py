@@ -96,6 +96,11 @@ def _import_arcade_api():
     raise ModuleNotFoundError("Could not import Arcade/OperationMode from ARC SDK: " + "; ".join(errors))
 
 
+def _import_game_action_api():
+    module = importlib.import_module("arcengine")
+    return module.GameAction, module.GameState
+
+
 def _competition_mode_available() -> bool:
     import os
 
@@ -191,6 +196,27 @@ def _extract_status(frame: Any) -> str:
     return str(value)
 
 
+def _to_game_action(action: str):
+    try:
+        GameAction, _ = _import_game_action_api()
+    except Exception:  # Local tests run without arcengine.
+        return action
+    parts = action.split()
+    base = parts[0]
+    game_action = getattr(GameAction, base)
+    if game_action.is_complex():
+        x = int(parts[2]) if len(parts) >= 3 else 0
+        y = int(parts[1]) if len(parts) >= 2 else 0
+        game_action.set_data({"x": x, "y": y})
+        game_action.reasoning = {
+            "desired_action": base,
+            "my_reason": "ACCA selected coordinate action",
+        }
+    elif game_action.is_simple():
+        game_action.reasoning = f"ACCA selected {base}"
+    return game_action
+
+
 class KaggleACCAAgent(_OfficialAgent):
     """Official-API wrapper around the SDK-independent ACCAAgent."""
 
@@ -203,10 +229,14 @@ class KaggleACCAAgent(_OfficialAgent):
         self.last_action: str | None = None
 
     def is_done(self, frames: list[Any], latest_frame: Any) -> bool:
-        status = _extract_status(latest_frame).upper()
-        return status in {"WIN", "GAME_OVER", "DONE", "FINISHED"}
+        try:
+            _, GameState = _import_game_action_api()
+            return latest_frame.state is GameState.WIN
+        except Exception:
+            status = _extract_status(latest_frame).upper()
+            return status in {"WIN", "DONE", "FINISHED"}
 
-    def choose_action(self, frames: list[Any], latest_frame: Any) -> str:
+    def choose_action(self, frames: list[Any], latest_frame: Any):
         grid = _extract_grid(latest_frame)
         game_id = _extract_game_id(latest_frame)
         if self.agent is None or self.game_id != game_id:
@@ -220,11 +250,24 @@ class KaggleACCAAgent(_OfficialAgent):
                 }
             )
             self.last_action = "RESET"
-            return "RESET"
+            return _to_game_action("RESET")
 
         action = self.agent.act(grid)
         self.last_action = str(action)
-        return self.last_action
+        return _to_game_action(self.last_action)
+
+
+def register_acca_agent() -> None:
+    root = _official_agents_root()
+    if root is not None:
+        _ensure_lightweight_agents_package(root)
+    pkg = sys.modules.get("agents")
+    if pkg is None:
+        pkg = types.ModuleType("agents")
+        sys.modules["agents"] = pkg
+    available = getattr(pkg, "AVAILABLE_AGENTS", {})
+    available["acca"] = KaggleACCAAgent
+    setattr(pkg, "AVAILABLE_AGENTS", available)
 
 
 def run_competition() -> None:
@@ -250,5 +293,11 @@ def run_competition() -> None:
                 "environment_files/ directory was found for offline smoke mode."
             )
         arcade = Arcade(operation_mode=OperationMode.OFFLINE, environments_dir=env_dir)
-    swarm = Swarm(agent_class=KaggleACCAAgent, arcade=arcade)
-    swarm.run()
+    games = arcade.get_environments()
+    if games and isinstance(games[0], dict):
+        games = [str(g["game_id"]) for g in games]
+    games = [str(game) for game in games]
+    register_acca_agent()
+    swarm = Swarm(agent="acca", ROOT_URL="http://localhost:8001", games=games)
+    swarm._arc = arcade
+    swarm.main()
