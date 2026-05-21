@@ -51,6 +51,14 @@ def test_extract_grid_reduces_multi_plane_stack():
     assert grid.shape == (2, 2)
 
 
+def test_extract_grid_reduces_deep_channel_first_stack():
+    frame = {"frame": np.ones((22, 64, 64), dtype=np.uint8)}
+
+    grid = _extract_grid(frame)
+
+    assert grid.shape == (64, 64)
+
+
 def test_extract_grid_tolerates_empty_official_frame():
     frame = {"frame": []}
 
