@@ -17,6 +17,15 @@ Attach the official ARC-AGI-3 competition dataset so the notebook can install th
 
 Attach this repository as a Kaggle dataset or upload `acca_code.zip` as an input. The notebook extracts `acca_code.zip` into `/kaggle/working/acca_code` and adds the repo root to `sys.path`.
 
+The bootstrap cell must print:
+
+```text
+Loaded bridge version: 2026-05-21-macro-v2
+Loaded bridge file: /kaggle/working/acca_code/src/arc_agi3_bridge.py
+```
+
+If those lines do not appear, restart the Kaggle kernel and re-run the notebook from the first cell. Old `src.*` modules can remain cached in a live kernel, so do not trust a run that lacks the bridge-version banner.
+
 Expected zip layout:
 
 ```text
