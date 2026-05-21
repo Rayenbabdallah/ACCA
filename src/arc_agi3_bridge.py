@@ -85,6 +85,17 @@ def _import_official_swarm():
     return importlib.import_module("agents.swarm").Swarm
 
 
+def _import_arcade_api():
+    errors: list[str] = []
+    for module_name in ("arc_agi_3", "arc_agi", "arc_agi.arcade"):
+        try:
+            module = importlib.import_module(module_name)
+            return module.Arcade, module.OperationMode
+        except Exception as exc:  # pragma: no cover - depends on Kaggle SDK.
+            errors.append(f"{module_name}: {exc}")
+    raise ModuleNotFoundError("Could not import Arcade/OperationMode from ARC SDK: " + "; ".join(errors))
+
+
 def _agent_path_diagnostics() -> str:
     candidates: list[str] = []
     for pattern in (
@@ -208,7 +219,7 @@ def run_competition() -> None:
     try:
         _add_official_agent_paths()
         Swarm = _import_official_swarm()
-        from arc_agi_3 import Arcade, OperationMode
+        Arcade, OperationMode = _import_arcade_api()
     except Exception as exc:  # pragma: no cover - requires Kaggle SDK.
         raise RuntimeError(
             "ARC-AGI-3 SDK is unavailable. Install from Kaggle's "
