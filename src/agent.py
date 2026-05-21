@@ -238,6 +238,13 @@ class ACCAAgent:
         # Lifetime exploration stats — persist across levels. Built up by
         # observing whether each action changed the grid.
         self.stats = ExplorationStats()
+        # Sequence learning: for each grid state we've ever been in, remember
+        # which actions led to a NOVEL state. On revisits to the same state,
+        # replay those known-good actions round-robin. Chains automatically:
+        # X --A--> Y (novel) and Y --B--> Z (novel) means seeing X→A→Y→B→Z.
+        self._novel_transitions: Dict[int, set] = {}
+        self._play_idx_per_state: Dict[int, int] = {}
+        self._current_state_hash: int | None = None
 
     def reset(self, initial: np.ndarray | Mapping[str, Any]) -> None:
         if isinstance(initial, Mapping) and "game_id" in initial:
@@ -275,6 +282,12 @@ class ACCAAgent:
         # If we hit STUCK_THRESHOLD we forget action stats this game and
         # re-explore — the alternative is grinding on cyclic actions forever.
         self._steps_since_novelty: int = 0
+        # Sequence learning state: cleared on new GAME (per-game knowledge).
+        # NOT cleared on level transition — post-RESET to initial state still
+        # benefits from transitions we learned in prior attempts.
+        self._novel_transitions = {}
+        self._play_idx_per_state = {}
+        self._current_state_hash = None
 
     def on_new_level(self) -> None:
         """Bridge calls this when a level transition is detected (grid shape change
@@ -345,8 +358,14 @@ class ACCAAgent:
                 else self.last_action
             )
             self.stats.record(last_text, changed, novel)
+            # Sequence learning: if the last action produced a novel state,
+            # remember it as a known-good action from the previous state.
+            if novel:
+                self._novel_transitions.setdefault(self._last_grid_hash, set()).add(last_text)
         self._last_grid_hash = grid_hash
         self._last_click = None
+        # Stash the current state hash so _state_conditioned_action can read it.
+        self._current_state_hash = grid_hash
 
         curr_graph = self.parser.parse(grid, frame_index=self.actions_taken + 1)
         tracking = self.tracker.update(curr_graph)
@@ -383,9 +402,15 @@ class ACCAAgent:
         return self._finish_step(curr_tracked, action)
 
     def _heuristic_action(self, state: ObjectGraph) -> ActionEnum | str | None:
-        """Try the cheap, specific policies — push, program, click — in priority
-        order. Returns None if none apply, in which case the caller falls back
-        to the full EIG/planner pipeline."""
+        """Try the cheap, specific policies — sequence learning, push, program,
+        click — in priority order. Returns None if none apply, in which case
+        the caller falls back to the full EIG/planner pipeline."""
+        # Sequence learning: if we've previously found an action that produced
+        # a novel state from this exact grid, replay it. This is the highest
+        # form of evidence we have — actual observation, not a heuristic guess.
+        learned_action = self._state_conditioned_action()
+        if learned_action is not None:
+            return learned_action
         push_action = self._push_toward_target_action()
         if push_action is not None:
             return push_action
@@ -396,6 +421,25 @@ class ACCAAgent:
         if coordinate_action is not None:
             return coordinate_action
         return None
+
+    def _state_conditioned_action(self) -> str | None:
+        """Look up known-good actions for the current grid state. Round-robin
+        through them on subsequent visits so multi-option states aren't stuck
+        on one branch.
+
+        Returns None if we've never seen this state, or have seen it but
+        nothing was ever novel from it.
+        """
+        h = self._current_state_hash
+        if h is None:
+            return None
+        good = self._novel_transitions.get(h)
+        if not good:
+            return None
+        actions = sorted(good)  # deterministic ordering for round-robin
+        idx = self._play_idx_per_state.get(h, 0) % len(actions)
+        self._play_idx_per_state[h] = idx + 1
+        return actions[idx]
 
     def _finish_step(self, curr_tracked: ObjectGraph, action) -> ActionEnum | str:
         action_text = str(action.value if isinstance(action, ActionEnum) else action)
@@ -429,10 +473,13 @@ class ACCAAgent:
             self.goal_inference.update_on_failure()
 
     def _select_action(self, state: ObjectGraph) -> ActionEnum | str:
-        # Order matters: specific game-shape heuristics first, then generic click,
-        # then EIG/planner fallback. (Before 2026-05-21 the order was inverted and
-        # _coordinate_action's color-14/15 filter blocked clicks on every real
-        # ARC-AGI-3 game; see CORRECTION-style scorecard analysis in commit log.)
+        # Order matters: actual learned evidence first (state-conditioned),
+        # then specific game-shape heuristics, then generic click, then EIG.
+        learned_action = self._state_conditioned_action()
+        if learned_action is not None:
+            self.planner.last_predicted_state = None
+            return learned_action
+
         push_action = self._push_toward_target_action()
         if push_action is not None:
             self.planner.last_predicted_state = None
