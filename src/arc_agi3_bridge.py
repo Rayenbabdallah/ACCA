@@ -152,14 +152,22 @@ def _get_value(obj: Any, names: tuple[str, ...]) -> Any:
 
 
 def _extract_grid(frame: Any) -> np.ndarray:
-    grid = _get_value(frame, ("grid", "state", "frame", "observation", "board"))
+    grid = _get_value(frame, ("grid", "frame", "observation", "board"))
     if grid is None:
         data = _get_value(frame, ("data", "payload"))
         if data is not None:
-            grid = _get_value(data, ("grid", "state", "frame", "observation", "board"))
+            grid = _get_value(data, ("grid", "frame", "observation", "board"))
+    if grid is None:
+        state = _get_value(frame, ("state",))
+        if isinstance(state, (list, tuple, np.ndarray)):
+            grid = state
     if grid is None:
         raise ValueError("could not extract grid from ARC-AGI-3 frame")
     arr = np.asarray(grid, dtype=np.uint8)
+    if arr.ndim == 3 and arr.shape[0] == 1:
+        arr = arr[0]
+    if arr.ndim == 3 and arr.shape[-1] in (3, 4):
+        arr = arr[..., 0]
     if arr.ndim != 2:
         raise ValueError(f"ARC-AGI-3 grid must be 2D, got shape {arr.shape}")
     return arr

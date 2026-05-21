@@ -26,6 +26,14 @@ def test_extract_grid_from_mapping_frame():
     assert grid.tolist() == [[0, 1], [2, 3]]
 
 
+def test_extract_grid_prefers_frame_over_status_state():
+    frame = {"frame": [[1, 2], [3, 4]], "state": "NOT_FINISHED"}
+
+    grid = _extract_grid(frame)
+
+    assert grid.tolist() == [[1, 2], [3, 4]]
+
+
 def test_extract_metadata_defaults_and_values():
     frame = {"grid": [[0]], "game_id": "game-a", "action_space": ["RESET", "ACTION1"]}
 
