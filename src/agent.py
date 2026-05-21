@@ -10,7 +10,8 @@ ARC Prize 2026 . Paper Track
 from __future__ import annotations
 
 from collections import deque
-from typing import Any, Mapping
+from dataclasses import dataclass, field
+from typing import Any, Dict, Mapping, Tuple
 
 import numpy as np
 
@@ -76,6 +77,53 @@ def _dedupe_programs(programs: list[list[str]]) -> list[list[str]]:
         seen.add(key)
         out.append(program)
     return out
+
+
+@dataclass
+class ExplorationStats:
+    """Per-game lifetime effectiveness tracking. Persists across levels — the
+    whole point is that what we learn on Level 1 informs Level 2.
+
+    Score = empirical change-rate + an exploration bonus that decays as a cell
+    or action is tried more. Unseen items get a flat 2.0 (well above any tried
+    item's ceiling of 1.0 + bonus) so we explore everything once before
+    exploiting.
+    """
+    cell_calls: Dict[Tuple[int, int], int] = field(default_factory=dict)
+    cell_changes: Dict[Tuple[int, int], int] = field(default_factory=dict)
+    action_calls: Dict[str, int] = field(default_factory=dict)
+    action_changes: Dict[str, int] = field(default_factory=dict)
+
+    def cell_score(self, cell: Tuple[int, int]) -> float:
+        calls = self.cell_calls.get(cell, 0)
+        if calls == 0:
+            return 2.0
+        changes = self.cell_changes.get(cell, 0)
+        return changes / calls + 1.0 / (calls + 1)
+
+    def action_score(self, action: str) -> float:
+        calls = self.action_calls.get(action, 0)
+        if calls == 0:
+            return 2.0
+        changes = self.action_changes.get(action, 0)
+        return changes / calls + 1.0 / (calls + 1)
+
+    def record(self, action_str: str, changed: bool) -> None:
+        parts = action_str.split()
+        if not parts:
+            return
+        base = parts[0]
+        self.action_calls[base] = self.action_calls.get(base, 0) + 1
+        if changed:
+            self.action_changes[base] = self.action_changes.get(base, 0) + 1
+        if base == "ACTION6" and len(parts) >= 3:
+            try:
+                cell = (int(parts[1]), int(parts[2]))
+            except ValueError:
+                return
+            self.cell_calls[cell] = self.cell_calls.get(cell, 0) + 1
+            if changed:
+                self.cell_changes[cell] = self.cell_changes.get(cell, 0) + 1
 
 
 class MechanicMemory:
@@ -162,6 +210,9 @@ class ACCAAgent:
         self.program_candidates: list[list[str]] = []
         self.program_index = 0
         self.program_pos = 0
+        # Lifetime exploration stats — persist across levels. Built up by
+        # observing whether each action changed the grid.
+        self.stats = ExplorationStats()
 
     def reset(self, initial: np.ndarray | Mapping[str, Any]) -> None:
         if isinstance(initial, Mapping) and "game_id" in initial:
@@ -196,7 +247,11 @@ class ACCAAgent:
     def on_new_level(self) -> None:
         """Bridge calls this when a level transition is detected (grid shape change
         or major content shift). Clears per-level state but keeps the cross-level
-        hypothesis bank and memory intact."""
+        hypothesis bank, ExplorationStats, and MechanicMemory intact.
+
+        Reloads `program_candidates` so sequences saved by `on_level_complete`
+        during *this* game become available for the next level inside the
+        same game."""
         self._tried_clicks.clear()
         self._useless_clicks.clear()
         self._last_click = None
@@ -205,6 +260,9 @@ class ACCAAgent:
         self.planner.current_plan = []
         self.planner.last_predicted_state = None
         self.planner.failure_count = 0
+        self.program_candidates = self.memory.candidate_programs(
+            self.game_id, self.action_space
+        )
         self.program_index = 0
         self.program_pos = 0
 
@@ -215,15 +273,24 @@ class ACCAAgent:
         grid = _as_grid(frame)
         self.current_frame = grid.copy()
 
-        # Click-feedback: if the last action was ACTION6 and the grid is
-        # unchanged, the click hit a useless cell — remember to skip it.
+        # Effectiveness feedback: did the previous action change the grid?
         grid_hash = hash(grid.tobytes())
-        if (
-            self._last_click is not None
-            and self._last_grid_hash is not None
-            and self._last_grid_hash == grid_hash
-        ):
+        changed = (
+            self._last_grid_hash is not None and self._last_grid_hash != grid_hash
+        )
+        # Click-feedback: cells that didn't change the grid are useless this level.
+        if self._last_click is not None and self._last_grid_hash is not None and not changed:
             self._useless_clicks.add(self._last_click)
+        # Lifetime stats: record (action, changed) for every action including
+        # cross-level. This is the signal driving _coordinate_action and the
+        # _select_action fallback.
+        if self.last_action is not None and self._last_grid_hash is not None:
+            last_text = str(
+                self.last_action.value
+                if isinstance(self.last_action, ActionEnum)
+                else self.last_action
+            )
+            self.stats.record(last_text, changed)
         self._last_grid_hash = grid_hash
         self._last_click = None
 
@@ -327,6 +394,16 @@ class ACCAAgent:
             self.planner.last_predicted_state = None
             return coordinate_action
 
+        # Effectiveness-based simple-action selection — when we have any
+        # evidence of which simple actions change state, prefer the one with
+        # the highest score over an untrained EIG selector. On real games the
+        # seeded hypothesis bank rarely matches, so EIG without this signal
+        # was effectively cycling.
+        effective_action = self._effective_simple_action()
+        if effective_action is not None:
+            self.planner.last_predicted_state = None
+            return effective_action
+
         if (
             self.bank.entropy() > config.ENTROPY_THRESHOLD
             and self.actions_taken < config.MAX_EXPLORATION_ACTIONS
@@ -366,22 +443,41 @@ class ACCAAgent:
         if not candidates:
             return None
 
-        # Prefer cells we haven't tried and haven't proven useless.
-        untried = [c for c in candidates if c not in self._tried_clicks and c not in self._useless_clicks]
-        if not untried:
-            # Fall back to tried-but-not-useless cells (state may have changed).
-            untried = [c for c in candidates if c not in self._useless_clicks]
-            self._tried_clicks.clear()
-        if not untried:
-            # Everything we've tried has been useless. Reset uselessness and
-            # rotate the whole candidate set.
+        # Filter out cells that produced no grid change earlier this level.
+        # If everything in the candidate set is "useless this level", reset
+        # uselessness — the state may have shifted enough that those cells
+        # are worth retrying.
+        eligible = [c for c in candidates if c not in self._useless_clicks]
+        if not eligible:
             self._useless_clicks.clear()
-            self._tried_clicks.clear()
-            untried = candidates
+            eligible = list(candidates)
 
-        row, col = untried[0]
+        # Rank by lifetime effectiveness. Unseen cells score 2.0 (forced to
+        # try once); proven-effective cells score 0..~1.4; thrashed-useless
+        # cells score near zero. Python's sort is stable — ties preserve the
+        # candidate-generation order from _click_candidates (centroids first,
+        # then small-cluster pixels, then fallback positions), which is the
+        # most informative ordering when there's no learned signal yet.
+        eligible.sort(key=lambda c: -self.stats.cell_score(c))
+        row, col = eligible[0]
         self._tried_clicks.add((row, col))
         return f"{ActionEnum.ACTION6.value} {row} {col}"
+
+    def _effective_simple_action(self) -> str | None:
+        """Pick the simple action (ACTION1..5, ACTION7) with the highest
+        effectiveness score, but only when we have *some* evidence — at least
+        one call recorded for at least one simple action. Otherwise return
+        None so the caller falls back to EIG / planner."""
+        simple = [
+            _base_action(a) for a in self.action_space
+            if _base_action(a) not in ("RESET", "ACTION6")
+        ]
+        simple = [a for a in simple if a]
+        if not simple:
+            return None
+        if not any(self.stats.action_calls.get(a, 0) > 0 for a in simple):
+            return None
+        return max(simple, key=self.stats.action_score)
 
     def _click_candidates(self, state: ObjectGraph) -> list[tuple[int, int]]:
         """Click candidates: every non-bg cluster's centroid, plus individual

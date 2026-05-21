@@ -431,8 +431,15 @@ class KaggleACCAAgent(_OfficialAgent):
             return _to_game_action("RESET")
 
         # GAME_OVER / NOT_PLAYED mid-game: send RESET to retry the level, but
-        # KEEP the agent and its bank intact.
+        # KEEP the agent and its bank intact. GAME_OVER is a level-failure
+        # signal — feed it to on_level_complete so MechanicMemory + goal_inference
+        # can learn from the failure.
         if status in {"GAME_OVER", "NOT_PLAYED"}:
+            if status == "GAME_OVER":
+                try:
+                    self.agent.on_level_complete(grid, success=False)
+                except Exception:
+                    pass
             self.probe_step = 0
             self.click_targets = _click_targets(grid)
             self.agent.on_new_level()
@@ -441,9 +448,17 @@ class KaggleACCAAgent(_OfficialAgent):
             return _to_game_action("RESET")
 
         # Level transition detection: shape, palette, or >=70% non-bg change.
-        # If we got a transition, refresh probe state and tell the agent.
+        # A transition WITHOUT a GAME_OVER status is treated as a level win —
+        # feed it to on_level_complete so the action sequence that got us here
+        # is saved to MechanicMemory and replayed via program_candidates next
+        # level. This is the cross-level learning loop that was previously
+        # disconnected (bridge never called on_level_complete).
         sig = _frame_signature(grid)
         if self._prev_signature is not None and _is_level_transition(self._prev_signature, sig):
+            try:
+                self.agent.on_level_complete(grid, success=True)
+            except Exception:
+                pass
             self.probe_step = 0
             self.click_targets = _click_targets(grid)
             self.agent.on_new_level()
