@@ -240,6 +240,30 @@ def _extract_status(frame: Any) -> str:
     return str(value)
 
 
+def _extract_levels_completed(frame: Any) -> int:
+    value = _get_value(frame, ("levels_completed", "level_completed", "completed_levels"))
+    if value is None:
+        data = _get_value(frame, ("data", "payload"))
+        if data is not None:
+            value = _get_value(data, ("levels_completed", "level_completed", "completed_levels"))
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _grid_digest(grid: np.ndarray) -> str:
+    colors = ",".join(str(int(c)) for c in np.unique(grid)[:12])
+    nonzero = np.argwhere(grid != 0)
+    if len(nonzero) == 0:
+        bbox = "empty"
+    else:
+        r0, c0 = nonzero.min(axis=0)
+        r1, c1 = nonzero.max(axis=0)
+        bbox = f"{int(r0)}:{int(r1)},{int(c0)}:{int(c1)}"
+    return f"shape={tuple(grid.shape)} colors=[{colors}] nz={int(np.count_nonzero(grid))} bbox={bbox}"
+
+
 def _to_game_action(action: str):
     try:
         GameAction, _ = _import_game_action_api()
@@ -308,6 +332,9 @@ class KaggleACCAAgent(_OfficialAgent):
         self.click_targets: list[tuple[int, int]] = []
         self._prev_signature: tuple | None = None
         self._consecutive_game_overs = 0
+        self._last_levels_completed = 0
+        self._level_reward_events: list[tuple[int, int]] = []
+        self._trajectory_samples: list[tuple[int, str]] = []
 
     def main(self) -> None:
         """Run one ARC-AGI-3 environment without depending on official Swarm.
@@ -327,6 +354,8 @@ class KaggleACCAAgent(_OfficialAgent):
         latest_frame = self._latest_frame_from_env()
         if not getattr(self, "frames", None):
             self.frames = [latest_frame]
+        self._last_levels_completed = _extract_levels_completed(latest_frame)
+        self._trajectory_samples = [(0, _grid_digest(_extract_grid(latest_frame)))]
 
         self.action_counter = int(getattr(self, "action_counter", 0))
         game_t0 = time.perf_counter()
@@ -348,6 +377,23 @@ class KaggleACCAAgent(_OfficialAgent):
                 else:
                     self.frames.append(frame)
             self.action_counter += 1
+
+            levels_completed = _extract_levels_completed(latest_frame)
+            if levels_completed > self._last_levels_completed:
+                self._level_reward_events.append((self.action_counter, levels_completed))
+                if self.agent is not None:
+                    grid = _extract_grid(latest_frame)
+                    try:
+                        self.agent.on_level_complete(grid, success=True)
+                    except Exception:
+                        pass
+                    self.agent.on_new_level()
+                    self._prev_signature = _frame_signature(grid)
+                self._last_levels_completed = levels_completed
+            if self.action_counter % 50 == 0:
+                self._trajectory_samples.append(
+                    (self.action_counter, _grid_digest(_extract_grid(latest_frame)))
+                )
 
             if not quiet and self.action_counter % log_every == 0:
                 status = _extract_status(latest_frame).upper() or "?"
@@ -394,6 +440,17 @@ class KaggleACCAAgent(_OfficialAgent):
                 )
                 print(
                     f"[{self.game_id}] learned transitions: {ntrans} novel actions across {nstates} states",
+                    flush=True,
+                )
+                print(
+                    f"[{self.game_id}] level reward events: {self._level_reward_events}",
+                    flush=True,
+                )
+                sample_text = " | ".join(
+                    f"#{idx}:{digest}" for idx, digest in self._trajectory_samples[:8]
+                )
+                print(
+                    f"[{self.game_id}] trajectory samples: {sample_text}",
                     flush=True,
                 )
                 stats = getattr(inner, "stats", None)
@@ -529,6 +586,8 @@ class KaggleACCAAgent(_OfficialAgent):
         probe = self._probe_action(grid, action_space)
         if probe is not None:
             self.probe_step += 1
+            if self.agent is not None:
+                self.agent.record_external_action(probe)
             self.last_action = probe
             return _to_game_action(probe)
 

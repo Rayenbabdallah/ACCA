@@ -15,6 +15,7 @@ from src.arc_agi3_bridge import (
     _extract_action_space,
     _extract_game_id,
     _extract_grid,
+    _extract_levels_completed,
     _game_id_of,
     _normalize_action_name,
 )
@@ -78,6 +79,12 @@ def test_extract_metadata_defaults_and_values():
 
     assert _extract_game_id(frame) == "game-a"
     assert _extract_action_space(frame) == ["RESET", "ACTION1"]
+
+
+def test_extract_levels_completed_from_frame_and_payload():
+    assert _extract_levels_completed({"levels_completed": 2}) == 2
+    assert _extract_levels_completed({"payload": {"completed_levels": 3}}) == 3
+    assert _extract_levels_completed({"grid": [[0]]}) == 0
 
 
 def test_extract_action_space_normalizes_official_values():
@@ -158,6 +165,37 @@ def test_kaggle_agent_respects_max_actions_without_off_by_one(monkeypatch):
 
     assert env.calls == 2
     assert agent.action_counter == 2
+
+
+def test_kaggle_agent_records_level_reward_event(monkeypatch):
+    class RewardEnv:
+        def __init__(self):
+            self.observation_space = {
+                "grid": [[1, 0], [0, 0]],
+                "game_id": "g",
+                "state": "NOT_FINISHED",
+                "action_space": ["ACTION1"],
+                "levels_completed": 0,
+            }
+
+        def step(self, action, data=None, reasoning=None):
+            return {
+                "grid": [[0, 1], [0, 0]],
+                "game_id": "g",
+                "state": "NOT_FINISHED",
+                "action_space": ["ACTION1"],
+                "levels_completed": 1,
+            }
+
+    monkeypatch.setenv("ACCA_QUIET", "1")
+    agent = KaggleACCAAgent(arc_env=RewardEnv())
+    agent.MAX_ACTIONS = 1
+
+    agent.main()
+
+    assert agent._level_reward_events == [(1, 1)]
+    assert agent.agent is not None
+    assert agent.agent.memory.has_programs("g")
 
 
 def test_game_id_of_environment_object():

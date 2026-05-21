@@ -171,6 +171,17 @@ def test_agent_reuses_program_memory_with_prefix_continuation():
     assert agent.eig_selector.calls == 0
 
 
+def test_agent_records_bridge_probe_actions_as_attempts():
+    agent = ACCAAgent()
+    agent.reset({"game_id": "game", "initial_grid": _frame(1), "action_space": ["ACTION1"]})
+
+    agent.record_external_action("ACTION1")
+    agent.on_level_complete(_frame(2), success=True)
+
+    assert agent.memory.has_programs("game")
+    assert agent.level_actions == ["ACTION1"]
+
+
 def test_agent_canonicalizes_numeric_action_space():
     agent = ACCAAgent()
 

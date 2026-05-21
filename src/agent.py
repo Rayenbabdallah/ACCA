@@ -279,7 +279,7 @@ class ACCAAgent:
         # they were clicked. Cleared on level transition.
         self._useless_clicks: set[tuple[int, int]] = set()
         self._last_click: tuple[int, int] | None = None
-        self._last_grid_hash: int | None = None
+        self._last_grid_hash: int | None = hash(frame.tobytes())
         # Per-level set of grid hashes ever seen. Used to distinguish NOVEL
         # state changes from REPEAT cycling. Reset on level transition.
         self._state_hashes_seen: set[int] = set()
@@ -518,6 +518,23 @@ class ACCAAgent:
         self.last_action = action
         self.actions_taken += 1
         return action
+
+    def record_external_action(self, action: ActionEnum | str) -> None:
+        """Record an action chosen by the Kaggle bridge before ACCA takes over.
+
+        The bridge emits a short probe sequence for bootstrapping. Those actions
+        still count as part of the attempt; if a probe solves a level, the
+        resulting program must be available to MechanicMemory.
+        """
+        if self.prev_tracked is None:
+            action_text = str(action.value if isinstance(action, ActionEnum) else action)
+            self.level_actions.append(action_text)
+            if _base_action(action_text) != "RESET":
+                self.current_attempt.append(action_text)
+            self.last_action = action
+            self.actions_taken += 1
+            return
+        self._finish_step(self.prev_tracked, action)
 
     def on_level_complete(self, terminal_frame: np.ndarray, success: bool) -> None:
         terminal_graph = self.parser.parse(_as_grid(terminal_frame), self.actions_taken + 1)
