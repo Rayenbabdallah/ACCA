@@ -84,31 +84,52 @@ class ExplorationStats:
     """Per-game lifetime effectiveness tracking. Persists across levels — the
     whole point is that what we learn on Level 1 informs Level 2.
 
-    Score = empirical change-rate + an exploration bonus that decays as a cell
-    or action is tried more. Unseen items get a flat 2.0 (well above any tried
-    item's ceiling of 1.0 + bonus) so we explore everything once before
-    exploiting.
+    Each outcome is one of three buckets:
+      - NOVEL change (best): the resulting grid is one we've never seen this game
+      - REPEAT change (mediocre): the grid changed but we've seen this state before
+      - NO change (worst): action was a no-op
+
+    Score = (1.0 * novels + 0.3 * repeats) / calls + 1/(calls+1). Unseen items
+    return 2.0 — forced exploration first. The novel/repeat distinction is what
+    stops the agent locking onto a state-changing-but-cycling action like
+    "cursor left" pressed 100× while the cursor wraps around forever.
     """
     cell_calls: Dict[Tuple[int, int], int] = field(default_factory=dict)
     cell_changes: Dict[Tuple[int, int], int] = field(default_factory=dict)
+    cell_novel: Dict[Tuple[int, int], int] = field(default_factory=dict)
     action_calls: Dict[str, int] = field(default_factory=dict)
     action_changes: Dict[str, int] = field(default_factory=dict)
+    action_novel: Dict[str, int] = field(default_factory=dict)
+
+    # Aggressive penalty for cycling: a state-changing action whose changes are
+    # all REPEATS scores ~0.1, well below any novel-producing action (~1.0) and
+    # well below untried actions (2.0). This is the main lever stopping the
+    # observed lock-in to ACTION1 on virtual-keyboard games.
+    NOVEL_WEIGHT: float = 1.0
+    REPEAT_WEIGHT: float = 0.1
+
+    def _score(self, calls: int, changes: int, novels: int) -> float:
+        if calls == 0:
+            return 2.0
+        repeats = max(0, changes - novels)
+        reward = self.NOVEL_WEIGHT * novels + self.REPEAT_WEIGHT * repeats
+        return reward / calls + 1.0 / (calls + 1)
 
     def cell_score(self, cell: Tuple[int, int]) -> float:
-        calls = self.cell_calls.get(cell, 0)
-        if calls == 0:
-            return 2.0
-        changes = self.cell_changes.get(cell, 0)
-        return changes / calls + 1.0 / (calls + 1)
+        return self._score(
+            self.cell_calls.get(cell, 0),
+            self.cell_changes.get(cell, 0),
+            self.cell_novel.get(cell, 0),
+        )
 
     def action_score(self, action: str) -> float:
-        calls = self.action_calls.get(action, 0)
-        if calls == 0:
-            return 2.0
-        changes = self.action_changes.get(action, 0)
-        return changes / calls + 1.0 / (calls + 1)
+        return self._score(
+            self.action_calls.get(action, 0),
+            self.action_changes.get(action, 0),
+            self.action_novel.get(action, 0),
+        )
 
-    def record(self, action_str: str, changed: bool) -> None:
+    def record(self, action_str: str, changed: bool, novel: bool) -> None:
         parts = action_str.split()
         if not parts:
             return
@@ -116,6 +137,8 @@ class ExplorationStats:
         self.action_calls[base] = self.action_calls.get(base, 0) + 1
         if changed:
             self.action_changes[base] = self.action_changes.get(base, 0) + 1
+        if novel:
+            self.action_novel[base] = self.action_novel.get(base, 0) + 1
         if base == "ACTION6" and len(parts) >= 3:
             try:
                 cell = (int(parts[1]), int(parts[2]))
@@ -124,6 +147,8 @@ class ExplorationStats:
             self.cell_calls[cell] = self.cell_calls.get(cell, 0) + 1
             if changed:
                 self.cell_changes[cell] = self.cell_changes.get(cell, 0) + 1
+            if novel:
+                self.cell_novel[cell] = self.cell_novel.get(cell, 0) + 1
 
 
 class MechanicMemory:
@@ -243,6 +268,13 @@ class ACCAAgent:
         self._useless_clicks: set[tuple[int, int]] = set()
         self._last_click: tuple[int, int] | None = None
         self._last_grid_hash: int | None = None
+        # Per-level set of grid hashes ever seen. Used to distinguish NOVEL
+        # state changes from REPEAT cycling. Reset on level transition.
+        self._state_hashes_seen: set[int] = set()
+        # Stuck detection: count steps since the last novel-state outcome.
+        # If we hit STUCK_THRESHOLD we forget action stats this game and
+        # re-explore — the alternative is grinding on cyclic actions forever.
+        self._steps_since_novelty: int = 0
 
     def on_new_level(self) -> None:
         """Bridge calls this when a level transition is detected (grid shape change
@@ -256,6 +288,8 @@ class ACCAAgent:
         self._useless_clicks.clear()
         self._last_click = None
         self._last_grid_hash = None
+        self._state_hashes_seen.clear()
+        self._steps_since_novelty = 0
         self.current_attempt = []
         self.planner.current_plan = []
         self.planner.last_predicted_state = None
@@ -273,24 +307,44 @@ class ACCAAgent:
         grid = _as_grid(frame)
         self.current_frame = grid.copy()
 
-        # Effectiveness feedback: did the previous action change the grid?
+        # Effectiveness feedback: did the previous action change the grid, and
+        # if so, was the resulting state a NOVEL one for this level?
         grid_hash = hash(grid.tobytes())
         changed = (
             self._last_grid_hash is not None and self._last_grid_hash != grid_hash
         )
+        # Novel = grid changed AND we've never been in this state on this level.
+        novel = changed and grid_hash not in self._state_hashes_seen
+        self._state_hashes_seen.add(grid_hash)
+
+        # Stuck detection: if we've gone STUCK_THRESHOLD steps without ever
+        # producing a novel state, the current strategy is grinding. Wipe the
+        # exploration stats and forget useless-this-level so the agent
+        # re-explores from scratch — better than infinite cycling.
+        STUCK_THRESHOLD = 30
+        if novel:
+            self._steps_since_novelty = 0
+        else:
+            self._steps_since_novelty += 1
+            if self._steps_since_novelty >= STUCK_THRESHOLD:
+                self.stats = ExplorationStats()
+                self._useless_clicks.clear()
+                self._tried_clicks.clear()
+                self._steps_since_novelty = 0
         # Click-feedback: cells that didn't change the grid are useless this level.
         if self._last_click is not None and self._last_grid_hash is not None and not changed:
             self._useless_clicks.add(self._last_click)
-        # Lifetime stats: record (action, changed) for every action including
-        # cross-level. This is the signal driving _coordinate_action and the
-        # _select_action fallback.
+        # Lifetime stats: record (action, changed, novel) for every action
+        # including cross-level. The novel flag is what stops the agent from
+        # locking onto state-changing-but-cycling actions like "cursor left"
+        # pressed 100x while wrapping around.
         if self.last_action is not None and self._last_grid_hash is not None:
             last_text = str(
                 self.last_action.value
                 if isinstance(self.last_action, ActionEnum)
                 else self.last_action
             )
-            self.stats.record(last_text, changed)
+            self.stats.record(last_text, changed, novel)
         self._last_grid_hash = grid_hash
         self._last_click = None
 
