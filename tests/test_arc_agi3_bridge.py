@@ -8,7 +8,13 @@ from __future__ import annotations
 
 import numpy as np
 
-from src.arc_agi3_bridge import KaggleACCAAgent, _extract_action_space, _extract_game_id, _extract_grid
+from src.arc_agi3_bridge import (
+    KaggleACCAAgent,
+    _extract_action_space,
+    _extract_game_id,
+    _extract_grid,
+    _game_id_of,
+)
 
 
 def test_extract_grid_from_mapping_frame():
@@ -40,3 +46,9 @@ def test_kaggle_agent_is_done_on_terminal_status():
 
     assert agent.is_done([], {"grid": [[0]], "state": "WIN"})
     assert not agent.is_done([], {"grid": [[0]], "state": "NOT_FINISHED"})
+
+
+def test_game_id_of_environment_object():
+    env = type("Env", (), {"game_id": "sk48-d8078629"})()
+
+    assert _game_id_of(env) == "sk48-d8078629"

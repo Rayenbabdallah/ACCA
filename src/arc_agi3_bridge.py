@@ -114,6 +114,13 @@ def _public_environment_dir() -> str | None:
     return None
 
 
+def _game_id_of(game: Any) -> str:
+    value = _get_value(game, ("game_id", "id", "name"))
+    if value is not None:
+        return str(value)
+    return str(game)
+
+
 def _agent_path_diagnostics() -> str:
     candidates: list[str] = []
     for pattern in (
@@ -220,13 +227,63 @@ def _to_game_action(action: str):
 class KaggleACCAAgent(_OfficialAgent):
     """Official-API wrapper around the SDK-independent ACCAAgent."""
 
+    MAX_ACTIONS = 80
+
     def __init__(self, *args: Any, memory: MechanicMemory | None = None, **kwargs: Any):
         if _OfficialAgent is not object:
             super().__init__(*args, **kwargs)
+        else:
+            for name, value in kwargs.items():
+                setattr(self, name, value)
+            self.frames = []
+            self.action_counter = 0
         self.memory = memory or MechanicMemory()
         self.agent: ACCAAgent | None = None
         self.game_id: str | None = None
         self.last_action: str | None = None
+
+    def main(self) -> None:
+        """Run one ARC-AGI-3 environment without depending on official Swarm."""
+        if not hasattr(self, "arc_env") or self.arc_env is None:
+            raise RuntimeError("KaggleACCAAgent requires an arc_env before main().")
+
+        latest_frame = self._latest_frame_from_env()
+        if not getattr(self, "frames", None):
+            self.frames = [latest_frame]
+
+        self.action_counter = int(getattr(self, "action_counter", 0))
+        while not self.is_done(self.frames, latest_frame) and self.action_counter <= self.MAX_ACTIONS:
+            action = self.choose_action(self.frames, latest_frame)
+            frame = self._take_arc_action(action)
+            if frame is not None:
+                latest_frame = frame
+                if hasattr(self, "append_frame"):
+                    self.append_frame(frame)
+                else:
+                    self.frames.append(frame)
+            self.action_counter += 1
+
+        if hasattr(self, "cleanup"):
+            self.cleanup()
+
+    def _latest_frame_from_env(self) -> Any:
+        raw = self.arc_env.observation_space
+        if hasattr(self, "_convert_raw_frame_data"):
+            return self._convert_raw_frame_data(raw)
+        return raw
+
+    def _take_arc_action(self, action: Any) -> Any:
+        if hasattr(self, "take_action"):
+            return self.take_action(action)
+        data = action.action_data.model_dump() if hasattr(action, "action_data") else {}
+        raw = self.arc_env.step(
+            action,
+            data=data,
+            reasoning=data.get("reasoning", {}) if isinstance(data, dict) else {},
+        )
+        if hasattr(self, "_convert_raw_frame_data"):
+            return self._convert_raw_frame_data(raw)
+        return raw
 
     def is_done(self, frames: list[Any], latest_frame: Any) -> bool:
         try:
@@ -271,10 +328,9 @@ def register_acca_agent() -> None:
 
 
 def run_competition() -> None:
-    """Run ACCA through the official ARC-AGI-3 Swarm in competition mode."""
+    """Run ACCA through the official ARC-AGI-3 Arcade API."""
     try:
         _add_official_agent_paths()
-        Swarm = _import_official_swarm()
         Arcade, OperationMode = _import_arcade_api()
     except Exception as exc:  # pragma: no cover - requires Kaggle SDK.
         raise RuntimeError(
@@ -293,11 +349,23 @@ def run_competition() -> None:
                 "environment_files/ directory was found for offline smoke mode."
             )
         arcade = Arcade(operation_mode=OperationMode.OFFLINE, environments_dir=env_dir)
-    games = arcade.get_environments()
-    if games and isinstance(games[0], dict):
-        games = [str(g["game_id"]) for g in games]
-    games = [str(game) for game in games]
+    games = [_game_id_of(game) for game in arcade.get_environments()]
     register_acca_agent()
-    swarm = Swarm(agent="acca", ROOT_URL="http://localhost:8001", games=games)
-    swarm._arc = arcade
-    swarm.main()
+    tags = ["acca", "competition" if _competition_mode_available() else "offline-smoke"]
+    card_id = arcade.open_scorecard(tags=tags)
+    try:
+        for game_id in games:
+            env = arcade.make(game_id, scorecard_id=card_id)
+            agent = KaggleACCAAgent(
+                card_id=card_id,
+                game_id=game_id,
+                agent_name="acca",
+                ROOT_URL="http://localhost:8001",
+                record=True,
+                arc_env=env,
+                tags=tags,
+            )
+            agent.main()
+    finally:
+        scorecard = arcade.close_scorecard(card_id)
+        print(scorecard)

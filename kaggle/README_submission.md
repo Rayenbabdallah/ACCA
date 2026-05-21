@@ -5,7 +5,7 @@ This directory contains the P3-T3 Kaggle packaging path.
 ## Files
 
 - `submission_v1.ipynb` - Kaggle notebook entrypoint.
-- `../src/arc_agi3_bridge.py` - adapter from Kaggle's official `is_done` / `choose_action` API to local `ACCAAgent`.
+- `../src/arc_agi3_bridge.py` - adapter from Kaggle's official Arcade/Agent API to local `ACCAAgent`.
 
 ## Kaggle Setup
 
@@ -31,5 +31,6 @@ acca_code.zip
 
 - No internet calls at runtime.
 - SDK installation uses only provided offline wheels.
-- Competition execution uses `OperationMode.COMPETITION` and `Swarm`.
+- Draft sessions without `ARC_API_KEY` run `OperationMode.OFFLINE` against `environment_files`.
+- Competition execution uses the official Arcade API directly, avoiding the sample `Swarm` online constructor.
 - Submit only when ready; Paper Track is one submission per team.
