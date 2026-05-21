@@ -25,12 +25,16 @@ def _add_official_agent_paths() -> None:
     patterns = [
         "/kaggle/input/**/ARC-AGI-3-Agents",
         "/kaggle/input/**/ARC-AGI-3-Agents/*",
+        "/kaggle/input/**/agents",
         "/kaggle/working/**/ARC-AGI-3-Agents",
         "/kaggle/working/**/ARC-AGI-3-Agents/*",
+        "/kaggle/working/**/agents",
     ]
     for pattern in patterns:
         for path in sorted(glob.glob(pattern, recursive=True)):
             root = Path(path)
+            if root.name == "agents":
+                root = root.parent
             if root.is_dir() and (root / "agents").exists() and str(root) not in sys.path:
                 sys.path.insert(0, str(root))
 
