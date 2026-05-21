@@ -43,6 +43,14 @@ def test_extract_grid_reduces_channel_first_stack():
     assert grid.tolist() == [[3, 1], [2, 4]]
 
 
+def test_extract_grid_reduces_multi_plane_stack():
+    frame = {"frame": np.eye(5, 2, dtype=np.uint8).reshape(5, 1, 2).repeat(2, axis=1)}
+
+    grid = _extract_grid(frame)
+
+    assert grid.shape == (2, 2)
+
+
 def test_extract_grid_tolerates_empty_official_frame():
     frame = {"frame": []}
 

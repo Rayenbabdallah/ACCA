@@ -168,7 +168,7 @@ def _extract_grid(frame: Any) -> np.ndarray:
         return np.zeros((1, 1), dtype=np.uint8)
     if arr.ndim == 3 and arr.shape[0] == 1:
         arr = arr[0]
-    if arr.ndim == 3 and arr.shape[0] in (2, 3, 4):
+    if arr.ndim == 3 and arr.shape[0] <= 16 and arr.shape[1] > 1 and arr.shape[2] > 1:
         arr = np.maximum.reduce(arr, axis=0)
     if arr.ndim == 3 and arr.shape[-1] in (3, 4):
         arr = arr[..., 0]
