@@ -15,7 +15,17 @@ Attach the official ARC-AGI-3 competition dataset so the notebook can install th
 /kaggle/input/arc-prize-2026-arc-agi-3/arc_agi_3_wheels/*.whl
 ```
 
-Attach this repository as a Kaggle dataset or include the `src/` package in the notebook environment. The notebook adds common Kaggle source paths to `sys.path`.
+Attach this repository as a Kaggle dataset or upload `acca_code.zip` as an input. The notebook extracts `acca_code.zip` into `/kaggle/working/acca_code` and adds the repo root to `sys.path`.
+
+Expected zip layout:
+
+```text
+acca_code.zip
+  src/
+    agent.py
+    arc_agi3_bridge.py
+    ...
+```
 
 ## Constraints
 
