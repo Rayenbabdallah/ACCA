@@ -1,9 +1,11 @@
 """
 local_eval.py — Local evaluation harness for ACCA agents.
 
-Loads ARC-AGI-3-format environment configs from a directory, runs an agent
-against each, counts environment actions (the scarce resource — internal
-compute is free), and emits a scorecard JSON.
+Loads game configs from a directory, runs an agent against each game (one level
+per stub env for now — multi-level multi-mechanic games arrive when the
+synthetic-env redesign per CORRECTION_PROMPT_FINAL §P0-T2 lands), counts
+environment actions (the scarce resource — internal compute is free), and emits
+a scorecard JSON keyed by the Kaggle data page formulas.
 
 Part of ACCA (Active Causal Compression Agent)
 ARC Prize 2026 · Paper Track
@@ -18,7 +20,7 @@ from typing import Any, Dict, List, Protocol
 
 import numpy as np
 
-from eval.scorecard import LevelResult, Scorecard, compute_scorecard
+from eval.scorecard import LevelRecord, Scorecard, compute_scorecard
 
 
 class Agent(Protocol):
@@ -27,7 +29,7 @@ class Agent(Protocol):
 
 
 class DummyAgent:
-    """Baseline that always sends RESET — should score RHAE = 0.0."""
+    """Baseline that always sends RESET — never completes anything, total_score = 0.0."""
 
     def reset(self, env_config: Dict[str, Any]) -> None:
         return None
@@ -37,34 +39,31 @@ class DummyAgent:
 
 
 class _StubEnv:
-    """Minimal env stub that consumes actions and never reports completion.
-
-    Used when env JSON configs don't ship with an executable simulator.
-    Real ARC-AGI-3 evaluation plugs in the official env runner here.
-    """
+    """Minimal env stub. A real ARC-AGI-3 env runner plugs in here later."""
 
     def __init__(self, config: Dict[str, Any]):
         self.config = config
         grid = config.get("initial_grid")
+        # Grid dimensions are variable — never assume 64x64.
         self.observation = (
-            np.asarray(grid, dtype=np.uint8) if grid is not None else np.zeros((64, 64), dtype=np.uint8)
+            np.asarray(grid, dtype=np.uint8) if grid is not None else np.zeros((1, 1), dtype=np.uint8)
         )
         self.completed = False
         self.action_count = 0
 
     def step(self, action: str) -> tuple[np.ndarray, bool]:
         self.action_count += 1
-        # A real env would mutate self.observation and set self.completed.
         return self.observation, self.completed
 
 
-def _load_env_configs(env_dir: str) -> List[Dict[str, Any]]:
+def _load_game_configs(env_dir: str) -> List[Dict[str, Any]]:
     configs: List[Dict[str, Any]] = []
     for path in sorted(Path(env_dir).glob("*.json")):
         with open(path, "r", encoding="utf-8") as f:
             cfg = json.load(f)
-        cfg.setdefault("level_id", path.stem)
+        cfg.setdefault("game_id", cfg.get("env_id", path.stem))
         cfg.setdefault("human_actions", 1)
+        cfg.setdefault("total_levels", 1)
         configs.append(cfg)
     return configs
 
@@ -85,24 +84,26 @@ def run_evaluation(
     agent_class: type,
     max_actions_per_level: int = 500,
 ) -> Scorecard:
-    """Run agent_class against every env config in env_dir; return a scorecard."""
-    configs = _load_env_configs(env_dir)
-    results: List[LevelResult] = []
+    """Run agent_class once per env JSON; build a scorecard from level records."""
+    configs = _load_game_configs(env_dir)
+    records: List[LevelRecord] = []
 
     for cfg in configs:
         env = _StubEnv(cfg)
         agent = agent_class()
-        ai_actions, completed = _run_episode(agent, env, max_actions_per_level)
-        results.append(
+        agent_actions, completed = _run_episode(agent, env, max_actions_per_level)
+        records.append(
             {
-                "level_id": cfg["level_id"],
+                "game_id": str(cfg["game_id"]),
+                "level_index": int(cfg.get("level_index", 1)),
+                "total_levels": int(cfg["total_levels"]),
                 "human_actions": int(cfg["human_actions"]),
-                "ai_actions": ai_actions,
+                "agent_actions": agent_actions,
                 "completed": completed,
             }
         )
 
-    return compute_scorecard(results)
+    return compute_scorecard(records)
 
 
 def _resolve_agent(dotted: str) -> type:
@@ -125,7 +126,7 @@ def main() -> None:
     Path(args.output).parent.mkdir(parents=True, exist_ok=True)
     with open(args.output, "w", encoding="utf-8") as f:
         json.dump(scorecard, f, indent=2)
-    print(f"mean_rhae={scorecard['mean_rhae']:.4f}  completion={scorecard['completion_rate']:.2%}")
+    print(f"total_score={scorecard['total_score']:.4f}  completion={scorecard['completion_rate']:.2%}")
 
 
 if __name__ == "__main__":
