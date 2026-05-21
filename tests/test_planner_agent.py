@@ -142,6 +142,19 @@ def test_memory_generates_chain_extension_programs():
     assert ["ACTION1", "ACTION1", "ACTION7", "ACTION2"] in candidates
 
 
+def test_state_conditioned_replay_requires_successful_program():
+    agent = ACCAAgent()
+    agent.reset({"game_id": "game", "initial_grid": _frame(1), "action_space": ["ACTION1", "ACTION2"]})
+    agent._current_state_hash = 123
+    agent._novel_transitions[123] = {"ACTION1"}
+
+    assert agent._state_conditioned_action() is None
+
+    agent.memory.store_program("game", ["ACTION2"])
+
+    assert agent._state_conditioned_action() == "ACTION1"
+
+
 def test_agent_reuses_program_memory_with_prefix_continuation():
     memory = MechanicMemory()
     memory.store_program("game", ["ACTION1"])

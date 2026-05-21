@@ -393,6 +393,36 @@ class KaggleACCAAgent(_OfficialAgent):
                     f"[{self.game_id}] learned transitions: {ntrans} novel actions across {nstates} states",
                     flush=True,
                 )
+                stats = getattr(inner, "stats", None)
+                if stats is not None:
+                    action_calls = getattr(stats, "action_calls", {})
+                    action_changes = getattr(stats, "action_changes", {})
+                    action_novel = getattr(stats, "action_novel", {})
+                    parts = []
+                    for action_name, calls in sorted(
+                        action_calls.items(),
+                        key=lambda item: (-item[1], item[0]),
+                    )[:8]:
+                        changes = action_changes.get(action_name, 0)
+                        novels = action_novel.get(action_name, 0)
+                        parts.append(f"{action_name}:{changes}/{novels}/{calls}")
+                    if parts:
+                        print(
+                            f"[{self.game_id}] effectiveness changed/novel/calls: "
+                            + ", ".join(parts),
+                            flush=True,
+                        )
+                    cell_calls = getattr(stats, "cell_calls", {})
+                    if cell_calls:
+                        unique_cells = len(cell_calls)
+                        total_clicks = sum(cell_calls.values())
+                        changed_cells = len(getattr(stats, "cell_changes", {}))
+                        novel_cells = len(getattr(stats, "cell_novel", {}))
+                        print(
+                            f"[{self.game_id}] click cells unique={unique_cells} "
+                            f"changed={changed_cells} novel={novel_cells} total={total_clicks}",
+                            flush=True,
+                        )
 
         if hasattr(self, "cleanup"):
             self.cleanup()

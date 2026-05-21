@@ -209,6 +209,9 @@ class MechanicMemory:
 
         return _dedupe_programs(candidates)
 
+    def has_programs(self, game_id: str) -> bool:
+        return bool(self._programs_by_game.get(game_id))
+
 
 class ACCAAgent:
     """Integrates perception, hypothesis posterior, EIG, and planning."""
@@ -416,7 +419,7 @@ class ACCAAgent:
         # form of evidence we have — actual observation, not a heuristic guess.
         learned_action = self._state_conditioned_action()
         if learned_action is not None and not self._base_suppressed(_base_action(learned_action)):
-            return learned_action
+            return self._desuppress_action(learned_action)
         push_action = self._push_toward_target_action()
         if push_action is not None:
             return self._desuppress_action(push_action)
@@ -439,6 +442,12 @@ class ACCAAgent:
         Returns None if we've never seen this state, or have seen it but
         nothing was ever novel from it.
         """
+        # A novel frame is not the same thing as progress. On keyboard games the
+        # agent can create hundreds of novel cursor positions without completing
+        # a level. Only trust state replay after a successful program has been
+        # stored for this game.
+        if not self.memory.has_programs(self.game_id):
+            return None
         h = self._current_state_hash
         if h is None:
             return None
@@ -492,7 +501,7 @@ class ACCAAgent:
         learned_action = self._state_conditioned_action()
         if learned_action is not None and not self._base_suppressed(_base_action(learned_action)):
             self.planner.last_predicted_state = None
-            return learned_action
+            return self._desuppress_action(learned_action)
 
         push_action = self._push_toward_target_action()
         if push_action is not None:
