@@ -95,12 +95,22 @@ def test_kaggle_agent_resets_then_returns_actions():
     assert agent.choose_action([frame], frame) == "ACTION6 0 1"
 
 
-def test_kaggle_agent_resets_after_game_over():
+def test_kaggle_agent_resets_after_game_over_keeps_agent_alive():
+    """After 2026-05-21: GAME_OVER mid-game no longer nulls self.agent.
+    The earlier code wiped the hypothesis bank on every GAME_OVER, so cross-level
+    memory never had a chance to apply. We now RESET + call agent.on_new_level()
+    but keep the agent instance (and its bank) alive."""
     agent = KaggleACCAAgent()
-    frame = {"grid": [[1]], "game_id": "g", "state": "GAME_OVER", "action_space": ["RESET", "ACTION1"]}
+    # First call sets self.agent (game_id-change branch)
+    frame = {"grid": [[1]], "game_id": "g", "state": "NOT_FINISHED", "action_space": ["RESET", "ACTION1"]}
+    agent.choose_action([], frame)
+    first_inner_agent = agent.agent
+    assert first_inner_agent is not None
 
-    assert agent.choose_action([], frame) == "RESET"
-    assert agent.agent is None
+    # Now GAME_OVER mid-game on the SAME game_id — must RESET but keep the agent.
+    game_over_frame = {"grid": [[1]], "game_id": "g", "state": "GAME_OVER", "action_space": ["RESET", "ACTION1"]}
+    assert agent.choose_action([], game_over_frame) == "RESET"
+    assert agent.agent is first_inner_agent
 
 
 def test_click_targets_include_color_centroids_and_center():

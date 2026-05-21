@@ -258,10 +258,36 @@ def _to_game_action(action: str):
     return game_action
 
 
+def _frame_signature(grid: np.ndarray) -> tuple:
+    """Compact descriptor for detecting level transitions: (shape, color-palette,
+    non-bg cell count). Cheap to compute; coarse enough to ignore single-cell
+    edits but catch new-level layouts."""
+    colors = tuple(sorted(int(c) for c in np.unique(grid)))
+    return (tuple(grid.shape), colors, int(np.count_nonzero(grid)))
+
+
+def _is_level_transition(prev_sig: tuple, curr_sig: tuple) -> bool:
+    """A grid shape change or a color-palette change is always a transition.
+    A >=70% jump in non-bg cell count is treated as one too (typical mid-level
+    actions move 1-2 cells, not 70% of them)."""
+    if prev_sig[0] != curr_sig[0]:
+        return True
+    if set(prev_sig[1]) != set(curr_sig[1]):
+        return True
+    prev_n, curr_n = prev_sig[2], curr_sig[2]
+    denom = max(prev_n, curr_n)
+    if denom > 0 and abs(prev_n - curr_n) / denom >= 0.7:
+        return True
+    return False
+
+
 class KaggleACCAAgent(_OfficialAgent):
     """Official-API wrapper around the SDK-independent ACCAAgent."""
 
-    MAX_ACTIONS = 80
+    # Raised from 80 (May 2026 scorecard analysis showed L1 burn at 60-80 actions
+    # without progress on every click game). The SDK enforces its own per-level
+    # cap of ~2x baseline; this just stops us from also leaving budget on the table.
+    MAX_ACTIONS = 300
 
     def __init__(self, *args: Any, memory: MechanicMemory | None = None, **kwargs: Any):
         if _OfficialAgent is not object:
@@ -277,6 +303,8 @@ class KaggleACCAAgent(_OfficialAgent):
         self.last_action: str | None = None
         self.probe_step = 0
         self.click_targets: list[tuple[int, int]] = []
+        self._prev_signature: tuple | None = None
+        self._consecutive_game_overs = 0
 
     def main(self) -> None:
         """Run one ARC-AGI-3 environment without depending on official Swarm."""
@@ -298,6 +326,15 @@ class KaggleACCAAgent(_OfficialAgent):
                 else:
                     self.frames.append(frame)
             self.action_counter += 1
+            # Early exit: if the SDK has flagged GAME_OVER and a RESET hasn't
+            # cleared it after 3 tries, more actions won't help — bail out.
+            status = _extract_status(latest_frame).upper()
+            if status == "GAME_OVER":
+                self._consecutive_game_overs += 1
+                if self._consecutive_game_overs >= 3:
+                    break
+            else:
+                self._consecutive_game_overs = 0
 
         if hasattr(self, "cleanup"):
             self.cleanup()
@@ -334,12 +371,12 @@ class KaggleACCAAgent(_OfficialAgent):
         game_id = _extract_game_id(latest_frame)
         status = _extract_status(latest_frame).upper()
         action_space = _extract_action_space(latest_frame)
-        if status in {"GAME_OVER", "NOT_PLAYED"}:
-            self.agent = None
-            self.probe_step = 0
-            self.click_targets = []
-            self.last_action = "RESET"
-            return _to_game_action("RESET")
+
+        # Fresh game (or first-ever call): create the agent.
+        # IMPORTANT: only do this on game_id change — NOT on GAME_OVER / NOT_PLAYED
+        # status. The earlier code nulled self.agent on every GAME_OVER, wiping
+        # the hypothesis bank and replay buffer; cross-level memory then never
+        # had a chance to apply.
         if self.agent is None or self.game_id != game_id:
             self.game_id = game_id
             self.agent = ACCAAgent(game_id=game_id, memory=self.memory)
@@ -352,8 +389,28 @@ class KaggleACCAAgent(_OfficialAgent):
             )
             self.probe_step = 0
             self.click_targets = _click_targets(grid)
+            self._prev_signature = _frame_signature(grid)
             self.last_action = "RESET"
             return _to_game_action("RESET")
+
+        # GAME_OVER / NOT_PLAYED mid-game: send RESET to retry the level, but
+        # KEEP the agent and its bank intact.
+        if status in {"GAME_OVER", "NOT_PLAYED"}:
+            self.probe_step = 0
+            self.click_targets = _click_targets(grid)
+            self.agent.on_new_level()
+            self._prev_signature = _frame_signature(grid)
+            self.last_action = "RESET"
+            return _to_game_action("RESET")
+
+        # Level transition detection: shape, palette, or >=70% non-bg change.
+        # If we got a transition, refresh probe state and tell the agent.
+        sig = _frame_signature(grid)
+        if self._prev_signature is not None and _is_level_transition(self._prev_signature, sig):
+            self.probe_step = 0
+            self.click_targets = _click_targets(grid)
+            self.agent.on_new_level()
+        self._prev_signature = sig
 
         probe = self._probe_action(grid, action_space)
         if probe is not None:
@@ -366,16 +423,110 @@ class KaggleACCAAgent(_OfficialAgent):
         return _to_game_action(self.last_action)
 
     def _probe_action(self, grid: np.ndarray, action_space: list[str]) -> str | None:
-        simple_actions = [a for a in ("ACTION1", "ACTION2", "ACTION3", "ACTION4", "ACTION5", "ACTION7") if a in action_space]
-        if "ACTION6" in action_space:
+        """Short bootstrapping probe: 1 cycle of available simple actions + up to
+        4 ACTION6 click probes from the per-level candidate set. ACCAAgent's
+        own _coordinate_action takes over from there with a richer policy."""
+        simple = [a for a in ("ACTION1", "ACTION2", "ACTION3", "ACTION4", "ACTION5", "ACTION7") if a in action_space]
+        click_probe_budget = 4 if "ACTION6" in action_space else 0
+
+        if click_probe_budget > 0 and self.probe_step < click_probe_budget:
             if not self.click_targets:
                 self.click_targets = _click_targets(grid)
-            if self.probe_step < len(self.click_targets):
-                row, col = self.click_targets[self.probe_step]
+            if self.click_targets:
+                row, col = self.click_targets[self.probe_step % len(self.click_targets)]
                 return f"ACTION6 {row} {col}"
-        if self.probe_step < min(12, len(simple_actions) * 2):
-            return simple_actions[self.probe_step % len(simple_actions)] if simple_actions else None
+
+        offset = self.probe_step - click_probe_budget
+        if offset < len(simple):
+            return simple[offset]
         return None
+
+
+class RandomClickAgent(_OfficialAgent):
+    """Sanity baseline — random clicks (70%) + random simple actions (30%).
+
+    Used to confirm the SDK / scorecard wiring is correct independently of the
+    ACCA policy: if THIS agent scores 0 on every game, the bug is in the bridge;
+    if it scores > 0 anywhere, the bug is in ACCA's policy. Toggle on with the
+    env var `ACCA_USE_RANDOM_BASELINE=1` before `run_competition()`."""
+
+    MAX_ACTIONS = 300
+
+    def __init__(self, *args: Any, **kwargs: Any):
+        if _OfficialAgent is not object:
+            super().__init__(*args, **kwargs)
+        else:
+            for name, value in kwargs.items():
+                setattr(self, name, value)
+            self.frames = []
+            self.action_counter = 0
+        import random
+        self._rng = random.Random(0)
+        self.game_id: str | None = None
+        self.last_action: str | None = None
+
+    def main(self) -> None:
+        if not hasattr(self, "arc_env") or self.arc_env is None:
+            raise RuntimeError("RandomClickAgent requires an arc_env before main().")
+        latest_frame = self._latest_frame_from_env()
+        if not getattr(self, "frames", None):
+            self.frames = [latest_frame]
+        self.action_counter = int(getattr(self, "action_counter", 0))
+        while not self.is_done(self.frames, latest_frame) and self.action_counter <= self.MAX_ACTIONS:
+            action = self.choose_action(self.frames, latest_frame)
+            frame = self._take_arc_action(action)
+            if frame is not None:
+                latest_frame = frame
+                if hasattr(self, "append_frame"):
+                    self.append_frame(frame)
+                else:
+                    self.frames.append(frame)
+            self.action_counter += 1
+        if hasattr(self, "cleanup"):
+            self.cleanup()
+
+    def _latest_frame_from_env(self) -> Any:
+        raw = self.arc_env.observation_space
+        if hasattr(self, "_convert_raw_frame_data"):
+            return self._convert_raw_frame_data(raw)
+        return raw
+
+    def _take_arc_action(self, action: Any) -> Any:
+        if hasattr(self, "take_action"):
+            return self.take_action(action)
+        data = action.action_data.model_dump() if hasattr(action, "action_data") else {}
+        raw = self.arc_env.step(
+            action,
+            data=data,
+            reasoning=data.get("reasoning", {}) if isinstance(data, dict) else {},
+        )
+        if hasattr(self, "_convert_raw_frame_data"):
+            return self._convert_raw_frame_data(raw)
+        return raw
+
+    def is_done(self, frames: list[Any], latest_frame: Any) -> bool:
+        try:
+            _, GameState = _import_game_action_api()
+            return latest_frame.state is GameState.WIN
+        except Exception:
+            status = _extract_status(latest_frame).upper()
+            return status in {"WIN", "DONE", "FINISHED"}
+
+    def choose_action(self, frames: list[Any], latest_frame: Any):
+        status = _extract_status(latest_frame).upper()
+        if status in {"GAME_OVER", "NOT_PLAYED"}:
+            return _to_game_action("RESET")
+        grid = _extract_grid(latest_frame)
+        action_space = _extract_action_space(latest_frame)
+        if "ACTION6" in action_space and self._rng.random() < 0.7:
+            h, w = grid.shape
+            r = self._rng.randint(0, max(0, h - 1))
+            c = self._rng.randint(0, max(0, w - 1))
+            return _to_game_action(f"ACTION6 {r} {c}")
+        simple = [a for a in action_space if a not in ("RESET", "ACTION6")]
+        if simple:
+            return _to_game_action(self._rng.choice(simple))
+        return _to_game_action("RESET")
 
 
 def _click_targets(grid: np.ndarray) -> list[tuple[int, int]]:
@@ -425,7 +576,15 @@ def register_acca_agent() -> None:
 
 
 def run_competition() -> None:
-    """Run ACCA through the official ARC-AGI-3 Arcade API."""
+    """Run ACCA (or the RandomClickAgent baseline) through the official Arcade.
+
+    Set `ACCA_USE_RANDOM_BASELINE=1` to swap in `RandomClickAgent` — useful for
+    A/B-testing whether the bridge wiring is correct independently of ACCA's
+    policy. Tag suffix `-random` is added to the scorecard so the runs are
+    distinguishable from production submissions.
+    """
+    import os
+
     try:
         _add_official_agent_paths()
         Arcade, OperationMode = _import_arcade_api()
@@ -435,6 +594,10 @@ def run_competition() -> None:
             "arc_agi_3_wheels/ directory before calling run_competition(). "
             + _agent_path_diagnostics()
         ) from exc
+
+    use_random_baseline = os.environ.get("ACCA_USE_RANDOM_BASELINE") == "1"
+    AgentClass = RandomClickAgent if use_random_baseline else KaggleACCAAgent
+    agent_name = "random-baseline" if use_random_baseline else "acca"
 
     if _competition_mode_available():
         arcade = Arcade(operation_mode=OperationMode.COMPETITION)
@@ -448,15 +611,16 @@ def run_competition() -> None:
         arcade = Arcade(operation_mode=OperationMode.OFFLINE, environments_dir=env_dir)
     games = [_game_id_of(game) for game in arcade.get_environments()]
     register_acca_agent()
-    tags = ["acca", "competition" if _competition_mode_available() else "offline-smoke"]
+    mode_tag = "competition" if _competition_mode_available() else "offline-smoke"
+    tags = [agent_name, mode_tag]
     card_id = arcade.open_scorecard(tags=tags)
     try:
         for game_id in games:
             env = arcade.make(game_id, scorecard_id=card_id)
-            agent = KaggleACCAAgent(
+            agent = AgentClass(
                 card_id=card_id,
                 game_id=game_id,
-                agent_name="acca",
+                agent_name=agent_name,
                 ROOT_URL="http://localhost:8001",
                 record=True,
                 arc_env=env,

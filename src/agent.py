@@ -186,6 +186,19 @@ class ACCAAgent:
         self.program_candidates = self.memory.candidate_programs(self.game_id, self.action_space)
         self.program_index = 0
         self.program_pos = 0
+        self._tried_clicks: set[tuple[int, int]] = set()
+
+    def on_new_level(self) -> None:
+        """Bridge calls this when a level transition is detected (grid shape change
+        or major content shift). Clears per-level state but keeps the cross-level
+        hypothesis bank and memory intact."""
+        self._tried_clicks.clear()
+        self.current_attempt = []
+        self.planner.current_plan = []
+        self.planner.last_predicted_state = None
+        self.planner.failure_count = 0
+        self.program_index = 0
+        self.program_pos = 0
 
     def act(self, observation: np.ndarray) -> ActionEnum | str:
         return self.step(observation)
@@ -239,11 +252,10 @@ class ACCAAgent:
             self.goal_inference.update_on_failure()
 
     def _select_action(self, state: ObjectGraph) -> ActionEnum | str:
-        coordinate_action = self._coordinate_action(state)
-        if coordinate_action is not None:
-            self.planner.last_predicted_state = None
-            return coordinate_action
-
+        # Order matters: specific game-shape heuristics first, then generic click,
+        # then EIG/planner fallback. (Before 2026-05-21 the order was inverted and
+        # _coordinate_action's color-14/15 filter blocked clicks on every real
+        # ARC-AGI-3 game; see CORRECTION-style scorecard analysis in commit log.)
         push_action = self._push_toward_target_action()
         if push_action is not None:
             self.planner.last_predicted_state = None
@@ -253,6 +265,11 @@ class ACCAAgent:
         if program_action is not None:
             self.planner.last_predicted_state = None
             return program_action
+
+        coordinate_action = self._coordinate_action(state)
+        if coordinate_action is not None:
+            self.planner.last_predicted_state = None
+            return coordinate_action
 
         if (
             self.bank.entropy() > config.ENTROPY_THRESHOLD
@@ -282,20 +299,67 @@ class ACCAAgent:
         return action
 
     def _coordinate_action(self, state: ObjectGraph) -> str | None:
-        if not any(str(action).split()[0] == ActionEnum.ACTION6.value for action in self.action_space):
+        """Propose one ACTION6 click on a non-background cluster we haven't tried
+        yet this level. Color-agnostic — every real ARC-AGI-3 click game uses
+        colors outside our synthetic-env palette, so the prior color-14/15 filter
+        never fired in production."""
+        if not any(_base_action(action) == ActionEnum.ACTION6.value for action in self.action_space):
             return None
 
-        targets: list[tuple[int, int]] = []
-        for node in state.nodes.values():
-            if node.color not in (14, 15):
-                continue
-            for row, col in sorted(node.pixels):
-                targets.append((row, col))
-
-        if not targets:
+        candidates = self._click_candidates(state)
+        if not candidates:
             return None
-        row, col = sorted(set(targets))[0]
+
+        untried = [c for c in candidates if c not in self._tried_clicks]
+        if not untried:
+            # Exhausted the current candidate set; rotate. State may have changed
+            # since earlier clicks (cells removed, new objects revealed).
+            self._tried_clicks.clear()
+            untried = candidates
+
+        row, col = untried[0]
+        self._tried_clicks.add((row, col))
         return f"{ActionEnum.ACTION6.value} {row} {col}"
+
+    def _click_candidates(self, state: ObjectGraph) -> list[tuple[int, int]]:
+        """Click candidates: every non-bg cluster's centroid, plus individual
+        pixels of small (<=16-px) clusters, plus a fixed grid-center/quadrant
+        fallback set. Deduplicated, order-preserving.
+
+        NOTE: ObjectNode.centroid is `(col_mean, row_mean)` (i.e., (x, y) in
+        image-axis convention). ACTION6 wants `(row, col)` format — so we
+        unpack as cx, cy and emit (cy, cx). Reversing this was the actual
+        production bug behind score=0 on click games — clicks landed at
+        transposed coordinates that hit empty cells.
+        """
+        candidates: list[tuple[int, int]] = []
+        for node in state.nodes.values():
+            if node.color == 0:
+                continue
+            cx, cy = node.centroid
+            candidates.append((int(round(cy)), int(round(cx))))
+        for node in state.nodes.values():
+            if node.color == 0 or node.area > 16:
+                continue
+            for (r, c) in sorted(node.pixels):
+                candidates.append((int(r), int(c)))
+        if self.current_frame is not None:
+            h, w = self.current_frame.shape
+            candidates.extend([
+                (h // 2, w // 2),
+                (h // 4, w // 4),
+                (h // 4, (3 * w) // 4),
+                ((3 * h) // 4, w // 4),
+                ((3 * h) // 4, (3 * w) // 4),
+            ])
+        seen: set[tuple[int, int]] = set()
+        out: list[tuple[int, int]] = []
+        for c in candidates:
+            if c in seen:
+                continue
+            seen.add(c)
+            out.append(c)
+        return out
 
     def _program_action(self) -> str | None:
         if not self._looks_like_toggle_program_world() or not self.program_candidates:
