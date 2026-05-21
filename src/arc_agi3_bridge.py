@@ -307,18 +307,37 @@ class KaggleACCAAgent(_OfficialAgent):
         self._consecutive_game_overs = 0
 
     def main(self) -> None:
-        """Run one ARC-AGI-3 environment without depending on official Swarm."""
+        """Run one ARC-AGI-3 environment without depending on official Swarm.
+
+        Emits a one-line timing log every 10 actions so you can confirm where
+        time goes (choose_action vs env.step). Toggle off with ACCA_QUIET=1.
+        """
         if not hasattr(self, "arc_env") or self.arc_env is None:
             raise RuntimeError("KaggleACCAAgent requires an arc_env before main().")
+
+        import os
+        import time
+
+        quiet = os.environ.get("ACCA_QUIET") == "1"
+        log_every = 10
 
         latest_frame = self._latest_frame_from_env()
         if not getattr(self, "frames", None):
             self.frames = [latest_frame]
 
         self.action_counter = int(getattr(self, "action_counter", 0))
+        game_t0 = time.perf_counter()
+        cum_choose = 0.0
+        cum_step = 0.0
         while not self.is_done(self.frames, latest_frame) and self.action_counter <= self.MAX_ACTIONS:
+            t0 = time.perf_counter()
             action = self.choose_action(self.frames, latest_frame)
+            t1 = time.perf_counter()
             frame = self._take_arc_action(action)
+            t2 = time.perf_counter()
+            cum_choose += t1 - t0
+            cum_step += t2 - t1
+
             if frame is not None:
                 latest_frame = frame
                 if hasattr(self, "append_frame"):
@@ -326,8 +345,18 @@ class KaggleACCAAgent(_OfficialAgent):
                 else:
                     self.frames.append(frame)
             self.action_counter += 1
-            # Early exit: if the SDK has flagged GAME_OVER and a RESET hasn't
-            # cleared it after 3 tries, more actions won't help — bail out.
+
+            if not quiet and self.action_counter % log_every == 0:
+                status = _extract_status(latest_frame).upper() or "?"
+                print(
+                    f"[{self.game_id}] #{self.action_counter:4d}  "
+                    f"avg_choose={1000 * cum_choose / self.action_counter:6.1f}ms  "
+                    f"avg_step={1000 * cum_step / self.action_counter:6.1f}ms  "
+                    f"last_act={getattr(action, 'name', str(action))[:16]}  "
+                    f"status={status}",
+                    flush=True,
+                )
+
             status = _extract_status(latest_frame).upper()
             if status == "GAME_OVER":
                 self._consecutive_game_overs += 1
@@ -335,6 +364,14 @@ class KaggleACCAAgent(_OfficialAgent):
                     break
             else:
                 self._consecutive_game_overs = 0
+
+        if not quiet:
+            wall = time.perf_counter() - game_t0
+            print(
+                f"[{self.game_id}] DONE in {wall:.1f}s ({self.action_counter} actions, "
+                f"choose={1000 * cum_choose:.0f}ms total, step={1000 * cum_step:.0f}ms total)",
+                flush=True,
+            )
 
         if hasattr(self, "cleanup"):
             self.cleanup()
@@ -622,7 +659,7 @@ def run_competition() -> None:
                 game_id=game_id,
                 agent_name=agent_name,
                 ROOT_URL="http://localhost:8001",
-                record=True,
+                record=False,    # was True; recording is a common slowness culprit
                 arc_env=env,
                 tags=tags,
             )

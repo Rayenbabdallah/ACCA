@@ -187,12 +187,20 @@ class ACCAAgent:
         self.program_index = 0
         self.program_pos = 0
         self._tried_clicks: set[tuple[int, int]] = set()
+        # Click-feedback memory: cells that produced zero grid change last time
+        # they were clicked. Cleared on level transition.
+        self._useless_clicks: set[tuple[int, int]] = set()
+        self._last_click: tuple[int, int] | None = None
+        self._last_grid_hash: int | None = None
 
     def on_new_level(self) -> None:
         """Bridge calls this when a level transition is detected (grid shape change
         or major content shift). Clears per-level state but keeps the cross-level
         hypothesis bank and memory intact."""
         self._tried_clicks.clear()
+        self._useless_clicks.clear()
+        self._last_click = None
+        self._last_grid_hash = None
         self.current_attempt = []
         self.planner.current_plan = []
         self.planner.last_predicted_state = None
@@ -206,10 +214,31 @@ class ACCAAgent:
     def step(self, frame: np.ndarray) -> ActionEnum | str:
         grid = _as_grid(frame)
         self.current_frame = grid.copy()
+
+        # Click-feedback: if the last action was ACTION6 and the grid is
+        # unchanged, the click hit a useless cell — remember to skip it.
+        grid_hash = hash(grid.tobytes())
+        if (
+            self._last_click is not None
+            and self._last_grid_hash is not None
+            and self._last_grid_hash == grid_hash
+        ):
+            self._useless_clicks.add(self._last_click)
+        self._last_grid_hash = grid_hash
+        self._last_click = None
+
         curr_graph = self.parser.parse(grid, frame_index=self.actions_taken + 1)
         tracking = self.tracker.update(curr_graph)
         curr_tracked = tracking.tracked
 
+        # Cheap heuristic check FIRST: if push/program/click will fire, skip the
+        # entire expensive bank/extractor/goal_inference/planner pipeline.
+        # On click games this is the difference between ~5ms and ~5s per step.
+        heuristic_action = self._heuristic_action(curr_tracked)
+        if heuristic_action is not None:
+            return self._finish_step(curr_tracked, heuristic_action)
+
+        # Full pipeline only when EIG/planner fallback is needed.
         if self.prev_tracked is not None and self.last_action is not None:
             obs = self.extractor.extract(
                 self.last_action,
@@ -230,12 +259,39 @@ class ACCAAgent:
                     self.bank.clear_observations()
 
         action = self._select_action(curr_tracked)
+        return self._finish_step(curr_tracked, action)
+
+    def _heuristic_action(self, state: ObjectGraph) -> ActionEnum | str | None:
+        """Try the cheap, specific policies — push, program, click — in priority
+        order. Returns None if none apply, in which case the caller falls back
+        to the full EIG/planner pipeline."""
+        push_action = self._push_toward_target_action()
+        if push_action is not None:
+            return push_action
+        program_action = self._program_action()
+        if program_action is not None:
+            return program_action
+        coordinate_action = self._coordinate_action(state)
+        if coordinate_action is not None:
+            return coordinate_action
+        return None
+
+    def _finish_step(self, curr_tracked: ObjectGraph, action) -> ActionEnum | str:
         action_text = str(action.value if isinstance(action, ActionEnum) else action)
         self.level_actions.append(action_text)
-        if _base_action(action_text) == "RESET":
+        base = _base_action(action_text)
+        if base == "RESET":
             self.current_attempt = []
         else:
             self.current_attempt.append(action_text)
+        # Track which click we just emitted so the next step can detect uselessness.
+        if base == "ACTION6":
+            parts = action_text.split()
+            if len(parts) >= 3:
+                try:
+                    self._last_click = (int(parts[1]), int(parts[2]))
+                except ValueError:
+                    self._last_click = None
         self.prev_tracked = curr_tracked
         self.last_action = action
         self.actions_taken += 1
@@ -310,10 +366,16 @@ class ACCAAgent:
         if not candidates:
             return None
 
-        untried = [c for c in candidates if c not in self._tried_clicks]
+        # Prefer cells we haven't tried and haven't proven useless.
+        untried = [c for c in candidates if c not in self._tried_clicks and c not in self._useless_clicks]
         if not untried:
-            # Exhausted the current candidate set; rotate. State may have changed
-            # since earlier clicks (cells removed, new objects revealed).
+            # Fall back to tried-but-not-useless cells (state may have changed).
+            untried = [c for c in candidates if c not in self._useless_clicks]
+            self._tried_clicks.clear()
+        if not untried:
+            # Everything we've tried has been useless. Reset uselessness and
+            # rotate the whole candidate set.
+            self._useless_clicks.clear()
             self._tried_clicks.clear()
             untried = candidates
 
