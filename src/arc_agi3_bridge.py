@@ -96,6 +96,19 @@ def _import_arcade_api():
     raise ModuleNotFoundError("Could not import Arcade/OperationMode from ARC SDK: " + "; ".join(errors))
 
 
+def _competition_mode_available() -> bool:
+    import os
+
+    return bool(os.environ.get("ARC_API_KEY") or os.environ.get("ARC_AGI_API_KEY"))
+
+
+def _public_environment_dir() -> str | None:
+    for path in glob.glob("/kaggle/input/**/environment_files", recursive=True):
+        if Path(path).is_dir():
+            return path
+    return None
+
+
 def _agent_path_diagnostics() -> str:
     candidates: list[str] = []
     for pattern in (
@@ -227,6 +240,15 @@ def run_competition() -> None:
             + _agent_path_diagnostics()
         ) from exc
 
-    arcade = Arcade(operation_mode=OperationMode.COMPETITION)
+    if _competition_mode_available():
+        arcade = Arcade(operation_mode=OperationMode.COMPETITION)
+    else:
+        env_dir = _public_environment_dir()
+        if env_dir is None:
+            raise RuntimeError(
+                "No ARC API key is available for competition mode, and no "
+                "environment_files/ directory was found for offline smoke mode."
+            )
+        arcade = Arcade(operation_mode=OperationMode.OFFLINE, environments_dir=env_dir)
     swarm = Swarm(agent_class=KaggleACCAAgent, arcade=arcade)
     swarm.run()
