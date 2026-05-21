@@ -94,13 +94,13 @@ This is Bayesian experimental design (Chaloner & Verdinelli 1995) applied to an 
 |---|---|
 | **Competition** | ARC Prize 2026 — Paper Track + ARC-AGI-3 Track |
 | **Code deadline** | November 2, 2026 (11:59 PM UTC) |
-| **Paper deadline** | November 8, 2026 (11:59 PM UTC) — treat this as hard stop |
+| **Paper deadline** | November 9, 2026 (11:59 PM UTC) |
 | **Results** | December 4, 2026 |
 | **Paper prize** | $50K (1st), $20K (2nd), $5K (3rd) + $375K outstanding papers pool |
-| **Tie-breaker** | Earlier submission wins — submit early drafts strategically |
-| **Open source** | Required for prize eligibility — MIT license, all authored code |
+| **Tie-breaker** | Earlier submitted Paper Track writeup wins a rubric tie |
+| **Open source** | Required for prize eligibility — Paper Track winning submission/source under CC-BY-4.0 |
 | **No internet** | Kaggle evaluation has no internet access — no API calls at eval time |
-| **Compute budget** | ~$50 for 120 evaluation tasks (~$0.42/task) |
+| **Compute budget** | ARC-AGI-3 notebook runtime must be <=9h CPU or GPU; evaluation uses 110 hidden games |
 | **Paper word limit** | ≤1,500 words for Kaggle writeup (arXiv version can be full-length) |
 | **Milestones** | June 30 (M1), September 30 (M2) — submit early for milestone prizes |
 
@@ -115,7 +115,7 @@ Phase 2  │ Jun 1–22     │ Causal hypothesis engine + MDL posterior scorer
 Phase 3  │ Jun 8–22     │ EIG exploration policy + planner → MILESTONE 1 (Jun 30)
 Phase 4  │ Jul 1–20     │ Cross-level mechanic memory + planner compiler
 Phase 5  │ Jul 25–Aug 20│ Full ablation sweep + ARC-AGI-2 universality → MILESTONE 2 (Sep 30)
-Phase 6  │ Oct 1–Nov 8  │ Final hardening + paper writing → FINAL SUBMISSION
+Phase 6  │ Oct 1–Nov 9  │ Final hardening + paper writing → FINAL SUBMISSION
 ```
 
 **Decision gate — July 15:** If EIG is not cleanly beating random exploration on the synthetic red-team suite, pivot to fallback strategy (TRM + CompressARC unification paper on ARC-AGI-2). Don't wait beyond this date to make the call.
@@ -146,11 +146,11 @@ arc-acca/
 ├── PLAN.md                      ← Detailed step-by-step build plan
 ├── PROMPTS.md                   ← Claude Code session prompts
 ├── REPRODUCIBILITY.md           ← One-command reproduction guide (written last)
-├── LICENSE                      ← MIT
+├── LICENSE                      ← CC-BY-4.0 for winning Paper Track submission/source
 │
 ├── src/
 │   ├── perception/
-│   │   ├── frame_parser.py      ← 64×64 frame → object graph G=(V,E)
+│   │   ├── frame_parser.py      ← variable grid frame (max 64×64) → object graph G=(V,E)
 │   │   ├── object_tracker.py    ← Hungarian matching across frames
 │   │   └── event_extractor.py   ← (action, pre, post) → symbolic delta
 │   │

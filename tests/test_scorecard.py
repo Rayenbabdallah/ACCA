@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from eval.local_eval import DummyAgent, run_evaluation
+from eval.local_eval import DummyAgent, HumanSolutionAgent, run_evaluation
 from eval.scorecard import compute_scorecard, game_score, level_score, total_score
 
 
@@ -105,3 +105,11 @@ def test_dummy_agent_scores_zero(tmp_path: Path):
     assert sc["total_score"] == 0.0
     assert sc["completion_rate"] == 0.0
     assert all(g["levels_completed"] == 0 for g in sc["per_game"])
+
+
+def test_human_solution_agent_scores_perfect_on_synthetic_games():
+    sc = run_evaluation("envs/synthetic", HumanSolutionAgent, max_actions_per_level=50)
+    assert sc["total_score"] == pytest.approx(1.0)
+    assert sc["completion_rate"] == pytest.approx(1.0)
+    assert len(sc["per_game"]) == 5
+    assert all(g["levels_completed"] == 6 for g in sc["per_game"])
