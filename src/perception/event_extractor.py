@@ -48,7 +48,7 @@ class Observation:
 def _as_action(action: ActionEnum | str) -> ActionEnum:
     if isinstance(action, ActionEnum):
         return action
-    return ActionEnum(action)
+    return ActionEnum(str(action).split()[0])
 
 
 def _event_sort_key(event: AtomicEvent) -> tuple[str, int, str]:

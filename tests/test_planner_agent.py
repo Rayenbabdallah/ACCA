@@ -40,6 +40,20 @@ def _frame(left: int = 1) -> np.ndarray:
     return frame
 
 
+def _click_frame() -> np.ndarray:
+    frame = np.zeros((8, 8), dtype=np.uint8)
+    frame[2, 5] = 14
+    frame[6, 1] = 15
+    return frame
+
+
+def _push_target_frame() -> np.ndarray:
+    frame = np.zeros((8, 8), dtype=np.uint8)
+    frame[3, 1] = 2
+    frame[3, 6] = 3
+    return frame
+
+
 def _push_right_hypothesis() -> Hypothesis:
     return Hypothesis([CausalRule([ActionIsCondition(ActionEnum.ACTION2)], [MoveEffect(0, 1, 0)])])
 
@@ -91,6 +105,28 @@ def test_agent_uses_eig_while_entropy_high():
 
     assert action == "ACTION1"
     assert agent.eig_selector.calls == 1
+
+
+def test_agent_expands_coordinate_action_for_click_targets():
+    agent = ACCAAgent()
+    agent.reset({"initial_grid": _click_frame(), "action_space": ["ACTION6"]})
+    agent.eig_selector = FixedEIG("ACTION1")
+
+    action = agent.step(_click_frame())
+
+    assert action == "ACTION6 2 5"
+    assert agent.eig_selector.calls == 0
+
+
+def test_agent_pushes_visible_movable_toward_target():
+    agent = ACCAAgent()
+    agent.reset({"initial_grid": _push_target_frame(), "action_space": ["ACTION1", "ACTION2"]})
+    agent.eig_selector = FixedEIG("ACTION1")
+
+    action = agent.step(_push_target_frame())
+
+    assert action == "ACTION2"
+    assert agent.eig_selector.calls == 0
 
 
 def test_agent_switches_to_planner_when_entropy_low():

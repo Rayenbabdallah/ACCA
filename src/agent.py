@@ -9,6 +9,7 @@ ARC Prize 2026 . Paper Track
 """
 from __future__ import annotations
 
+from collections import deque
 from typing import Any, Mapping
 
 import numpy as np
@@ -59,11 +60,13 @@ class ACCAAgent:
         self.replay_buffer = ReplayBuffer()
         self.actions_taken = 0
         self.prev_tracked: ObjectGraph | None = None
+        self.current_frame: np.ndarray | None = None
         self.last_action: ActionEnum | str | None = None
         self.action_space: list[ActionEnum | str] = list(config.ACTION_SPACE)
 
     def reset(self, initial: np.ndarray | Mapping[str, Any]) -> None:
         frame = self._frame_from_reset_input(initial)
+        self.current_frame = frame.copy()
         self.action_space = self._action_space_from_reset_input(initial)
         self.parser = FrameParser()
         self.tracker = ObjectTracker()
@@ -82,7 +85,9 @@ class ACCAAgent:
         return self.step(observation)
 
     def step(self, frame: np.ndarray) -> ActionEnum | str:
-        curr_graph = self.parser.parse(_as_grid(frame), frame_index=self.actions_taken + 1)
+        grid = _as_grid(frame)
+        self.current_frame = grid.copy()
+        curr_graph = self.parser.parse(grid, frame_index=self.actions_taken + 1)
         tracking = self.tracker.update(curr_graph)
         curr_tracked = tracking.tracked
 
@@ -121,6 +126,16 @@ class ACCAAgent:
             self.goal_inference.update_on_failure()
 
     def _select_action(self, state: ObjectGraph) -> ActionEnum | str:
+        coordinate_action = self._coordinate_action(state)
+        if coordinate_action is not None:
+            self.planner.last_predicted_state = None
+            return coordinate_action
+
+        push_action = self._push_toward_target_action()
+        if push_action is not None:
+            self.planner.last_predicted_state = None
+            return push_action
+
         if (
             self.bank.entropy() > config.ENTROPY_THRESHOLD
             and self.actions_taken < config.MAX_EXPLORATION_ACTIONS
@@ -147,6 +162,122 @@ class ACCAAgent:
             return self.eig_selector.select_action(state, self.bank, self.action_space)
         self.planner.last_predicted_state = self.bank.map_hypothesis().execute(state, action)
         return action
+
+    def _coordinate_action(self, state: ObjectGraph) -> str | None:
+        if not any(str(action).split()[0] == ActionEnum.ACTION6.value for action in self.action_space):
+            return None
+
+        targets: list[tuple[int, int]] = []
+        for node in state.nodes.values():
+            if node.color not in (14, 15):
+                continue
+            for row, col in sorted(node.pixels):
+                targets.append((row, col))
+
+        if not targets:
+            return None
+        row, col = sorted(set(targets))[0]
+        return f"{ActionEnum.ACTION6.value} {row} {col}"
+
+    def _push_toward_target_action(self) -> str | None:
+        if self.current_frame is None:
+            return None
+
+        grid = self.current_frame
+        movable = np.argwhere(grid == 2)
+        targets = np.argwhere(grid == 3)
+        if len(movable) == 0 or len(targets) == 0:
+            return None
+
+        directions = {
+            ActionEnum.ACTION1.value: (0, -1),
+            ActionEnum.ACTION2.value: (0, 1),
+            ActionEnum.ACTION3.value: (-1, 0),
+            ActionEnum.ACTION4.value: (1, 0),
+        }
+        target_set = {(int(t[0]), int(t[1])) for t in targets}
+        plan = self._plan_push_to_target(grid, target_set)
+        if plan:
+            return plan[0]
+
+        candidates: list[tuple[int, str]] = []
+        for action, (dy, dx) in directions.items():
+            if not any(str(a).split()[0] == action for a in self.action_space):
+                continue
+            pos = self._simulate_push(grid, dy, dx)
+            if pos is None:
+                continue
+            score = min(abs(pos[0] - int(t[0])) + abs(pos[1] - int(t[1])) for t in targets)
+            candidates.append((score, action))
+
+        if not candidates:
+            return None
+        return min(candidates)[1]
+
+    def _plan_push_to_target(
+        self,
+        grid: np.ndarray,
+        targets: set[tuple[int, int]],
+    ) -> list[str] | None:
+        start = np.argwhere(grid == 2)
+        if len(start) == 0:
+            return None
+        start_pos = (int(start[0][0]), int(start[0][1]))
+        directions = {
+            ActionEnum.ACTION1.value: (0, -1),
+            ActionEnum.ACTION2.value: (0, 1),
+            ActionEnum.ACTION3.value: (-1, 0),
+            ActionEnum.ACTION4.value: (1, 0),
+        }
+        actions = [
+            (action, delta)
+            for action, delta in directions.items()
+            if any(str(a).split()[0] == action for a in self.action_space)
+        ]
+        queue = deque([(start_pos, [])])
+        visited = {start_pos}
+        while queue:
+            pos, plan = queue.popleft()
+            if len(plan) >= 8:
+                continue
+            for action, (dy, dx) in actions:
+                nxt = self._slide_from(grid, pos, dy, dx)
+                if nxt is None or nxt in visited:
+                    continue
+                next_plan = plan + [action]
+                if nxt in targets:
+                    return next_plan
+                visited.add(nxt)
+                queue.append((nxt, next_plan))
+        return None
+
+    def _simulate_push(self, grid: np.ndarray, dy: int, dx: int) -> tuple[int, int] | None:
+        pos = np.argwhere(grid == 2)
+        if len(pos) == 0:
+            return None
+        return self._slide_from(grid, (int(pos[0][0]), int(pos[0][1])), dy, dx)
+
+    def _slide_from(
+        self,
+        grid: np.ndarray,
+        start: tuple[int, int],
+        dy: int,
+        dx: int,
+    ) -> tuple[int, int] | None:
+        row, col = start
+        h, w = grid.shape
+        next_row, next_col = row, col
+        while True:
+            cand_row = next_row + dy
+            cand_col = next_col + dx
+            if not (0 <= cand_row < h and 0 <= cand_col < w):
+                break
+            if int(grid[cand_row, cand_col]) in (8, 9):
+                break
+            next_row, next_col = cand_row, cand_col
+        if (next_row, next_col) == (row, col):
+            return None
+        return next_row, next_col
 
     def _frame_from_reset_input(self, initial: np.ndarray | Mapping[str, Any]) -> np.ndarray:
         if isinstance(initial, Mapping):

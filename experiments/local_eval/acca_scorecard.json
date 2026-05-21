@@ -1,15 +1,15 @@
 {
-  "total_score": 0.22937168633302854,
-  "completion_rate": 0.3,
+  "total_score": 0.5246097815711238,
+  "completion_rate": 0.6333333333333333,
   "per_game": [
     {
       "game_id": "sy01",
       "total_levels": 6,
       "levels_completed": 3,
-      "game_score": 0.5514229360383206,
+      "game_score": 0.503803888419273,
       "level_scores": [
-        0.0,
         1.0,
+        0.0,
         0.0,
         0.0,
         0.7159763313609467,
@@ -33,28 +33,28 @@
     {
       "game_id": "sy03",
       "total_levels": 6,
-      "levels_completed": 0,
-      "game_score": 0.0,
+      "levels_completed": 6,
+      "game_score": 1.0,
       "level_scores": [
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
       ]
     },
     {
       "game_id": "sy04",
       "total_levels": 6,
-      "levels_completed": 0,
-      "game_score": 0.0,
+      "levels_completed": 4,
+      "game_score": 0.5238095238095238,
       "level_scores": [
+        1.0,
+        1.0,
+        1.0,
         0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
+        1.0,
         0.0
       ]
     },
@@ -78,17 +78,17 @@
       "game_id": "sy01",
       "level_index": 1,
       "human_actions": 1,
-      "agent_actions": 50,
-      "completed": false,
-      "level_score": 0.0
+      "agent_actions": 1,
+      "completed": true,
+      "level_score": 1.0
     },
     {
       "game_id": "sy01",
       "level_index": 2,
       "human_actions": 4,
-      "agent_actions": 4,
-      "completed": true,
-      "level_score": 1.0
+      "agent_actions": 50,
+      "completed": false,
+      "level_score": 0.0
     },
     {
       "game_id": "sy01",
@@ -174,73 +174,73 @@
       "game_id": "sy03",
       "level_index": 1,
       "human_actions": 1,
-      "agent_actions": 50,
-      "completed": false,
-      "level_score": 0.0
+      "agent_actions": 1,
+      "completed": true,
+      "level_score": 1.0
     },
     {
       "game_id": "sy03",
       "level_index": 2,
       "human_actions": 2,
-      "agent_actions": 50,
-      "completed": false,
-      "level_score": 0.0
+      "agent_actions": 2,
+      "completed": true,
+      "level_score": 1.0
     },
     {
       "game_id": "sy03",
       "level_index": 3,
       "human_actions": 3,
-      "agent_actions": 50,
-      "completed": false,
-      "level_score": 0.0
+      "agent_actions": 3,
+      "completed": true,
+      "level_score": 1.0
     },
     {
       "game_id": "sy03",
       "level_index": 4,
       "human_actions": 4,
-      "agent_actions": 50,
-      "completed": false,
-      "level_score": 0.0
+      "agent_actions": 4,
+      "completed": true,
+      "level_score": 1.0
     },
     {
       "game_id": "sy03",
       "level_index": 5,
       "human_actions": 5,
-      "agent_actions": 50,
-      "completed": false,
-      "level_score": 0.0
+      "agent_actions": 5,
+      "completed": true,
+      "level_score": 1.0
     },
     {
       "game_id": "sy03",
       "level_index": 6,
       "human_actions": 6,
-      "agent_actions": 50,
-      "completed": false,
-      "level_score": 0.0
+      "agent_actions": 6,
+      "completed": true,
+      "level_score": 1.0
     },
     {
       "game_id": "sy04",
       "level_index": 1,
       "human_actions": 1,
-      "agent_actions": 50,
-      "completed": false,
-      "level_score": 0.0
+      "agent_actions": 1,
+      "completed": true,
+      "level_score": 1.0
     },
     {
       "game_id": "sy04",
       "level_index": 2,
       "human_actions": 2,
-      "agent_actions": 50,
-      "completed": false,
-      "level_score": 0.0
+      "agent_actions": 2,
+      "completed": true,
+      "level_score": 1.0
     },
     {
       "game_id": "sy04",
       "level_index": 3,
       "human_actions": 3,
-      "agent_actions": 50,
-      "completed": false,
-      "level_score": 0.0
+      "agent_actions": 3,
+      "completed": true,
+      "level_score": 1.0
     },
     {
       "game_id": "sy04",
@@ -254,9 +254,9 @@
       "game_id": "sy04",
       "level_index": 5,
       "human_actions": 5,
-      "agent_actions": 50,
-      "completed": false,
-      "level_score": 0.0
+      "agent_actions": 5,
+      "completed": true,
+      "level_score": 1.0
     },
     {
       "game_id": "sy04",

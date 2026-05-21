@@ -26,7 +26,7 @@ PropertyOp = Literal["eq", "gt", "lt", "ge", "le"]
 def _as_action(action: ActionEnum | str) -> ActionEnum:
     if isinstance(action, ActionEnum):
         return action
-    return ActionEnum(action)
+    return ActionEnum(str(action).split()[0])
 
 
 def _compare(left: float, op: CountOp | PropertyOp, right: float) -> bool:

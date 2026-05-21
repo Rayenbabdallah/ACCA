@@ -124,7 +124,7 @@ def test_multiple_simultaneous_events_order_independent():
     )
     tracking = TrackingResult(tracked=post_graph, spawned=[10], destroyed=[2])
 
-    obs = EventExtractor().extract(ActionEnum.ACTION6, pre, tracking, timestamp=1)
+    obs = EventExtractor().extract("ACTION6 9 9", pre, tracking, timestamp=1)
 
     expected = [
         AtomicEvent("MOVED", 1, {"dx": 5, "dy": 0}),
@@ -132,6 +132,7 @@ def test_multiple_simultaneous_events_order_independent():
         AtomicEvent("DESTROYED", 2, {"color": 4}),
         AtomicEvent("SPAWNED", 10, {"color": 8, "position": (9.0, 9.0)}),
     ]
+    assert obs.action == ActionEnum.ACTION6
     assert canonical_delta(obs.delta) == canonical_delta(expected)
 
 
