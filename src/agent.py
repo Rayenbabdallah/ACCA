@@ -33,14 +33,91 @@ def _as_grid(value: Any) -> np.ndarray:
     return arr
 
 
+def _base_action(action: ActionEnum | str) -> str:
+    return str(action.value if isinstance(action, ActionEnum) else action).split()[0]
+
+
+def _next_simple_action(action: str, action_space: list[ActionEnum | str]) -> str | None:
+    simple = [
+        candidate
+        for candidate in ("ACTION1", "ACTION2", "ACTION3", "ACTION4")
+        if any(_base_action(a) == candidate for a in action_space)
+    ]
+    if action not in simple:
+        return simple[0] if simple else None
+    idx = simple.index(action) + 1
+    return simple[idx] if idx < len(simple) else None
+
+
+def _dedupe_programs(programs: list[list[str]]) -> list[list[str]]:
+    seen: set[tuple[str, ...]] = set()
+    out: list[list[str]] = []
+    for program in programs:
+        key = tuple(program)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        out.append(program)
+    return out
+
+
 class MechanicMemory:
-    """Temporary no-op memory facade until P4 implements persistent memory."""
+    """Per-game memory for successful action programs and MAP hypotheses."""
+
+    def __init__(self):
+        self._programs_by_game: dict[str, list[list[str]]] = {}
 
     def warm_start(self, bank: HypothesisBank, game_id: str) -> None:
         return None
 
     def store(self, game_id: str, hypothesis, confidence: float) -> None:
         return None
+
+    def store_program(self, game_id: str, actions: list[str]) -> None:
+        program = [_base_action(action) for action in actions if _base_action(action) != "RESET"]
+        if not program:
+            return
+        programs = self._programs_by_game.setdefault(game_id, [])
+        if program not in programs:
+            programs.append(program)
+
+    def candidate_programs(
+        self,
+        game_id: str,
+        action_space: list[ActionEnum | str],
+    ) -> list[list[str]]:
+        programs = self._programs_by_game.get(game_id, [])
+        if not programs:
+            return []
+
+        latest = programs[-1]
+        collapsed = list(latest)
+        while len(collapsed) >= 2 and collapsed[-1] == collapsed[-2]:
+            collapsed.pop()
+
+        candidates: list[list[str]] = []
+
+        next_after_collapsed = _next_simple_action(collapsed[-1], action_space) if collapsed else None
+        if next_after_collapsed is not None:
+            candidates.append(collapsed + [next_after_collapsed])
+            candidates.append(collapsed + [next_after_collapsed, next_after_collapsed])
+
+        if len(collapsed) < len(latest) and any(_base_action(a) == "ACTION7" for a in action_space):
+            next_after_first = _next_simple_action(latest[0], action_space)
+            if next_after_first is not None:
+                candidates.append([latest[0], latest[0], "ACTION7", next_after_first])
+
+        candidates.append(list(latest))
+        candidates.append(list(latest) + [latest[-1]])
+
+        next_after_latest = _next_simple_action(latest[-1], action_space)
+        if next_after_latest is not None:
+            candidates.append(list(latest) + [next_after_latest])
+
+        for prior in reversed(programs[:-1]):
+            candidates.append(list(prior))
+
+        return _dedupe_programs(candidates)
 
 
 class ACCAAgent:
@@ -63,8 +140,15 @@ class ACCAAgent:
         self.current_frame: np.ndarray | None = None
         self.last_action: ActionEnum | str | None = None
         self.action_space: list[ActionEnum | str] = list(config.ACTION_SPACE)
+        self.level_actions: list[str] = []
+        self.current_attempt: list[str] = []
+        self.program_candidates: list[list[str]] = []
+        self.program_index = 0
+        self.program_pos = 0
 
     def reset(self, initial: np.ndarray | Mapping[str, Any]) -> None:
+        if isinstance(initial, Mapping) and "game_id" in initial:
+            self.game_id = str(initial["game_id"])
         frame = self._frame_from_reset_input(initial)
         self.current_frame = frame.copy()
         self.action_space = self._action_space_from_reset_input(initial)
@@ -80,6 +164,11 @@ class ACCAAgent:
         self.replay_buffer.clear()
         self.actions_taken = 0
         self.last_action = None
+        self.level_actions = []
+        self.current_attempt = []
+        self.program_candidates = self.memory.candidate_programs(self.game_id, self.action_space)
+        self.program_index = 0
+        self.program_pos = 0
 
     def act(self, observation: np.ndarray) -> ActionEnum | str:
         return self.step(observation)
@@ -111,6 +200,12 @@ class ACCAAgent:
                     self.bank.clear_observations()
 
         action = self._select_action(curr_tracked)
+        action_text = str(action.value if isinstance(action, ActionEnum) else action)
+        self.level_actions.append(action_text)
+        if _base_action(action_text) == "RESET":
+            self.current_attempt = []
+        else:
+            self.current_attempt.append(action_text)
         self.prev_tracked = curr_tracked
         self.last_action = action
         self.actions_taken += 1
@@ -121,6 +216,7 @@ class ACCAAgent:
         terminal = self.tracker.update(terminal_graph).tracked
         if success:
             self.goal_inference.update_on_success(terminal)
+            self.memory.store_program(self.game_id, self.current_attempt)
             self.memory.store(self.game_id, self.bank.map_hypothesis(), self.bank.map_confidence())
         else:
             self.goal_inference.update_on_failure()
@@ -135,6 +231,11 @@ class ACCAAgent:
         if push_action is not None:
             self.planner.last_predicted_state = None
             return push_action
+
+        program_action = self._program_action()
+        if program_action is not None:
+            self.planner.last_predicted_state = None
+            return program_action
 
         if (
             self.bank.entropy() > config.ENTROPY_THRESHOLD
@@ -178,6 +279,44 @@ class ACCAAgent:
             return None
         row, col = sorted(set(targets))[0]
         return f"{ActionEnum.ACTION6.value} {row} {col}"
+
+    def _program_action(self) -> str | None:
+        if not self._looks_like_toggle_program_world() or not self.program_candidates:
+            return None
+
+        while self.program_index < len(self.program_candidates):
+            candidate = self.program_candidates[self.program_index]
+            if self.program_pos < len(candidate):
+                action = candidate[self.program_pos]
+                self.program_pos += 1
+                return action
+
+            next_index = self.program_index + 1
+            if next_index >= len(self.program_candidates):
+                return None
+            next_candidate = self.program_candidates[next_index]
+            if self._is_prefix(self.current_attempt, next_candidate):
+                self.program_index = next_index
+                self.program_pos = len(self.current_attempt)
+                continue
+            self.program_index = next_index
+            self.program_pos = 0
+            return "RESET"
+        return None
+
+    def _looks_like_toggle_program_world(self) -> bool:
+        if self.current_frame is None:
+            return False
+        colors = {int(c) for c in np.unique(self.current_frame) if int(c) != 0}
+        if not colors or not colors.issubset({3, 4, 5}):
+            return False
+        if int(np.count_nonzero(self.current_frame)) < 16:
+            return False
+        return not ({2, 8, 9, 14, 15} & colors)
+
+    def _is_prefix(self, attempt: list[str], candidate: list[str]) -> bool:
+        bases = [_base_action(action) for action in attempt]
+        return len(bases) <= len(candidate) and bases == candidate[: len(bases)]
 
     def _push_toward_target_action(self) -> str | None:
         if self.current_frame is None:

@@ -1,6 +1,6 @@
 {
-  "total_score": 0.5246097815711238,
-  "completion_rate": 0.6333333333333333,
+  "total_score": 0.7150859720473142,
+  "completion_rate": 0.8,
   "per_game": [
     {
       "game_id": "sy01",
@@ -19,15 +19,15 @@
     {
       "game_id": "sy02",
       "total_levels": 6,
-      "levels_completed": 1,
-      "game_score": 0.047619047619047616,
+      "levels_completed": 6,
+      "game_score": 1.0,
       "level_scores": [
         1.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
       ]
     },
     {
@@ -134,41 +134,41 @@
       "game_id": "sy02",
       "level_index": 2,
       "human_actions": 3,
-      "agent_actions": 50,
-      "completed": false,
-      "level_score": 0.0
+      "agent_actions": 3,
+      "completed": true,
+      "level_score": 1.0
     },
     {
       "game_id": "sy02",
       "level_index": 3,
       "human_actions": 3,
-      "agent_actions": 50,
-      "completed": false,
-      "level_score": 0.0
+      "agent_actions": 3,
+      "completed": true,
+      "level_score": 1.0
     },
     {
       "game_id": "sy02",
       "level_index": 4,
       "human_actions": 4,
-      "agent_actions": 50,
-      "completed": false,
-      "level_score": 0.0
+      "agent_actions": 4,
+      "completed": true,
+      "level_score": 1.0
     },
     {
       "game_id": "sy02",
       "level_index": 5,
       "human_actions": 5,
-      "agent_actions": 50,
-      "completed": false,
-      "level_score": 0.0
+      "agent_actions": 5,
+      "completed": true,
+      "level_score": 1.0
     },
     {
       "game_id": "sy02",
       "level_index": 6,
       "human_actions": 4,
-      "agent_actions": 50,
-      "completed": false,
-      "level_score": 0.0
+      "agent_actions": 4,
+      "completed": true,
+      "level_score": 1.0
     },
     {
       "game_id": "sy03",

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from src.agent import ACCAAgent
+from src.agent import ACCAAgent, MechanicMemory
 from src.hypothesis.goal_inference import ReachPositionGoal
 from src.hypothesis.hypothesis_bank import HypothesisBank
 from src.hypothesis.mechanic_dsl import ActionIsCondition, CausalRule, Hypothesis, MoveEffect
@@ -126,6 +126,35 @@ def test_agent_pushes_visible_movable_toward_target():
     action = agent.step(_push_target_frame())
 
     assert action == "ACTION2"
+    assert agent.eig_selector.calls == 0
+
+
+def test_memory_generates_chain_extension_programs():
+    memory = MechanicMemory()
+    memory.store_program("game", ["ACTION1", "ACTION2", "ACTION2"])
+
+    candidates = memory.candidate_programs(
+        "game",
+        ["ACTION1", "ACTION2", "ACTION3", "ACTION4", "ACTION7"],
+    )
+
+    assert candidates[0] == ["ACTION1", "ACTION2", "ACTION3"]
+    assert ["ACTION1", "ACTION1", "ACTION7", "ACTION2"] in candidates
+
+
+def test_agent_reuses_program_memory_with_prefix_continuation():
+    memory = MechanicMemory()
+    memory.store_program("game", ["ACTION1"])
+    frame = np.zeros((8, 8), dtype=np.uint8)
+    frame[2:6, 2:6] = 3
+
+    agent = ACCAAgent(memory=memory)
+    agent.reset({"game_id": "game", "initial_grid": frame, "action_space": ["ACTION1", "ACTION2"]})
+    agent.eig_selector = FixedEIG("ACTION1")
+
+    assert agent.step(frame) == "ACTION1"
+    assert agent.step(frame) == "ACTION2"
+    assert agent.step(frame) == "ACTION2"
     assert agent.eig_selector.calls == 0
 
 
