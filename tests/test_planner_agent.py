@@ -158,6 +158,14 @@ def test_agent_reuses_program_memory_with_prefix_continuation():
     assert agent.eig_selector.calls == 0
 
 
+def test_agent_canonicalizes_numeric_action_space():
+    agent = ACCAAgent()
+
+    agent.reset({"initial_grid": _frame(1), "action_space": ["1", "GameAction.ACTION6", "0"]})
+
+    assert agent.action_space == ["ACTION1", "ACTION6", "RESET"]
+
+
 def test_agent_switches_to_planner_when_entropy_low():
     agent = ACCAAgent()
     agent.reset({"initial_grid": _frame(1), "action_space": [ActionEnum.ACTION2]})

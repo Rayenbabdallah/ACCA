@@ -37,6 +37,23 @@ def _base_action(action: ActionEnum | str) -> str:
     return str(action.value if isinstance(action, ActionEnum) else action).split()[0]
 
 
+def _canonical_action(action: ActionEnum | str) -> ActionEnum | str:
+    if isinstance(action, ActionEnum):
+        return action
+    text = str(action).split()[0]
+    if "." in text:
+        text = text.rsplit(".", 1)[-1]
+    if text in ActionEnum._value2member_map_:
+        return text
+    if text.isdigit():
+        number = int(text)
+        if 1 <= number <= 7:
+            return f"ACTION{number}"
+        if number == 0:
+            return "RESET"
+    return text
+
+
 def _next_simple_action(action: str, action_space: list[ActionEnum | str]) -> str | None:
     simple = [
         candidate
@@ -431,5 +448,5 @@ class ACCAAgent:
         initial: np.ndarray | Mapping[str, Any],
     ) -> list[ActionEnum | str]:
         if isinstance(initial, Mapping) and "action_space" in initial:
-            return list(initial["action_space"])
+            return [_canonical_action(action) for action in initial["action_space"]]
         return list(config.ACTION_SPACE)
