@@ -10,13 +10,33 @@ ARC Prize 2026 . Paper Track
 """
 from __future__ import annotations
 
+import glob
+import sys
+from pathlib import Path
 from typing import Any, Mapping
 
 import numpy as np
 
 from src.agent import ACCAAgent, MechanicMemory
 
+
+def _add_official_agent_paths() -> None:
+    """Expose Kaggle's attached ARC-AGI-3-Agents repo to Python imports."""
+    patterns = [
+        "/kaggle/input/**/ARC-AGI-3-Agents",
+        "/kaggle/input/**/ARC-AGI-3-Agents/*",
+        "/kaggle/working/**/ARC-AGI-3-Agents",
+        "/kaggle/working/**/ARC-AGI-3-Agents/*",
+    ]
+    for pattern in patterns:
+        for path in sorted(glob.glob(pattern, recursive=True)):
+            root = Path(path)
+            if root.is_dir() and (root / "agents").exists() and str(root) not in sys.path:
+                sys.path.insert(0, str(root))
+
+
 try:  # Local development does not have the Kaggle SDK installed.
+    _add_official_agent_paths()
     from agents.agent import Agent as _OfficialAgent
 except Exception:  # pragma: no cover - exercised only when SDK is absent.
     _OfficialAgent = object
@@ -122,6 +142,7 @@ class KaggleACCAAgent(_OfficialAgent):
 def run_competition() -> None:
     """Run ACCA through the official ARC-AGI-3 Swarm in competition mode."""
     try:
+        _add_official_agent_paths()
         from agents import Swarm
         from arc_agi_3 import Arcade, OperationMode
     except Exception as exc:  # pragma: no cover - requires Kaggle SDK.
