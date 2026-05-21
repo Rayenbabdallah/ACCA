@@ -22,7 +22,7 @@ import numpy as np
 from src.agent import ACCAAgent, MechanicMemory
 
 
-BRIDGE_VERSION = "2026-05-21-macro-v2"
+BRIDGE_VERSION = "2026-05-21-reward-v3"
 
 
 def _add_official_agent_paths() -> None:

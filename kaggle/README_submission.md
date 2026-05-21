@@ -20,7 +20,7 @@ Attach this repository as a Kaggle dataset or upload `acca_code.zip` as an input
 The bootstrap cell must print:
 
 ```text
-Loaded bridge version: 2026-05-21-macro-v2
+Loaded bridge version: 2026-05-21-reward-v3
 Loaded bridge file: /kaggle/working/acca_code/src/arc_agi3_bridge.py
 ```
 
