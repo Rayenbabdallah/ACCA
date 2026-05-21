@@ -25,9 +25,11 @@ def _add_official_agent_paths() -> None:
     patterns = [
         "/kaggle/input/**/ARC-AGI-3-Agents",
         "/kaggle/input/**/ARC-AGI-3-Agents/*",
+        "/kaggle/input/**/ARC-AGI-3-Agents/**/*",
         "/kaggle/input/**/agents",
         "/kaggle/working/**/ARC-AGI-3-Agents",
         "/kaggle/working/**/ARC-AGI-3-Agents/*",
+        "/kaggle/working/**/ARC-AGI-3-Agents/**/*",
         "/kaggle/working/**/agents",
     ]
     for pattern in patterns:
@@ -37,6 +39,24 @@ def _add_official_agent_paths() -> None:
                 root = root.parent
             if root.is_dir() and (root / "agents").exists() and str(root) not in sys.path:
                 sys.path.insert(0, str(root))
+            if root.is_file() and root.name == "__init__.py" and root.parent.name == "agents":
+                parent = root.parent.parent
+                if str(parent) not in sys.path:
+                    sys.path.insert(0, str(parent))
+
+
+def _agent_path_diagnostics() -> str:
+    candidates: list[str] = []
+    for pattern in (
+        "/kaggle/input/**/agents",
+        "/kaggle/input/**/agents/__init__.py",
+        "/kaggle/input/**/ARC-AGI-3-Agents",
+        "/kaggle/input/**/Swarm.py",
+        "/kaggle/input/**/swarm.py",
+    ):
+        candidates.extend(glob.glob(pattern, recursive=True))
+    visible = [p for p in sys.path if "agent" in p.lower() or "arc-agi" in p.lower()]
+    return f"agent candidates={candidates[:30]} sys.path={visible[:30]}"
 
 
 try:  # Local development does not have the Kaggle SDK installed.
@@ -152,7 +172,8 @@ def run_competition() -> None:
     except Exception as exc:  # pragma: no cover - requires Kaggle SDK.
         raise RuntimeError(
             "ARC-AGI-3 SDK is unavailable. Install from Kaggle's "
-            "arc_agi_3_wheels/ directory before calling run_competition()."
+            "arc_agi_3_wheels/ directory before calling run_competition(). "
+            + _agent_path_diagnostics()
         ) from exc
 
     arcade = Arcade(operation_mode=OperationMode.COMPETITION)
