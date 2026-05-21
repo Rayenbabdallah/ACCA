@@ -9,6 +9,7 @@ from __future__ import annotations
 import numpy as np
 
 from src.arc_agi3_bridge import (
+    BRIDGE_VERSION,
     KaggleACCAAgent,
     _click_targets,
     _extract_action_space,
@@ -17,6 +18,10 @@ from src.arc_agi3_bridge import (
     _game_id_of,
     _normalize_action_name,
 )
+
+
+def test_bridge_version_is_visible_for_kaggle_cache_checks():
+    assert BRIDGE_VERSION
 
 
 def test_extract_grid_from_mapping_frame():

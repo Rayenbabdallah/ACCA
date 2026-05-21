@@ -22,6 +22,9 @@ import numpy as np
 from src.agent import ACCAAgent, MechanicMemory
 
 
+BRIDGE_VERSION = "2026-05-21-macro-v2"
+
+
 def _add_official_agent_paths() -> None:
     """Expose Kaggle's attached ARC-AGI-3-Agents repo to Python imports."""
     patterns = [
@@ -394,6 +397,11 @@ class KaggleACCAAgent(_OfficialAgent):
                     flush=True,
                 )
                 stats = getattr(inner, "stats", None)
+                print(
+                    f"[{self.game_id}] diagnostics bridge={BRIDGE_VERSION} "
+                    f"stats={'yes' if stats is not None else 'no'}",
+                    flush=True,
+                )
                 if stats is not None:
                     action_calls = getattr(stats, "action_calls", {})
                     action_changes = getattr(stats, "action_changes", {})
@@ -690,6 +698,8 @@ def run_competition() -> None:
     distinguishable from production submissions.
     """
     import os
+
+    print(f"ACCA bridge version: {BRIDGE_VERSION}", flush=True)
 
     try:
         _add_official_agent_paths()
