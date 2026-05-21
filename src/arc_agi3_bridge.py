@@ -190,7 +190,29 @@ def _extract_action_space(frame: Any) -> list[str]:
             "ACTION6",
             "ACTION7",
         ]
-    return [str(action) for action in action_space]
+    return [_normalize_action_name(action) for action in action_space]
+
+
+def _normalize_action_name(action: Any) -> str:
+    if hasattr(action, "name"):
+        name = str(action.name)
+        if name.startswith("ACTION") or name == "RESET":
+            return name
+    text = str(action).split()[0]
+    if "." in text:
+        text = text.rsplit(".", 1)[-1]
+    if text.startswith("ACTION") or text == "RESET":
+        return text
+    if text.isdigit():
+        number = int(text)
+        if 1 <= number <= 7:
+            return f"ACTION{number}"
+        if number == 0:
+            return "RESET"
+    value = getattr(action, "value", None)
+    if value is not None and value is not action:
+        return _normalize_action_name(value)
+    return text
 
 
 def _extract_game_id(frame: Any) -> str:

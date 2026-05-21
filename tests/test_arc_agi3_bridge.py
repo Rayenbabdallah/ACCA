@@ -14,6 +14,7 @@ from src.arc_agi3_bridge import (
     _extract_game_id,
     _extract_grid,
     _game_id_of,
+    _normalize_action_name,
 )
 
 
@@ -39,6 +40,18 @@ def test_extract_metadata_defaults_and_values():
 
     assert _extract_game_id(frame) == "game-a"
     assert _extract_action_space(frame) == ["RESET", "ACTION1"]
+
+
+def test_extract_action_space_normalizes_official_values():
+    frame = {"grid": [[0]], "available_actions": ["1", "GameAction.ACTION6", "RESET"]}
+
+    assert _extract_action_space(frame) == ["ACTION1", "ACTION6", "RESET"]
+
+
+def test_normalize_action_name_prefers_enum_name():
+    action = type("OfficialAction", (), {"name": "ACTION2", "value": 2})()
+
+    assert _normalize_action_name(action) == "ACTION2"
 
 
 def test_kaggle_agent_resets_then_returns_actions():
