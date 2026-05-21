@@ -200,6 +200,35 @@ def test_effective_simple_action_avoids_suppressed_family():
     assert agent._effective_simple_action() == "ACTION2"
 
 
+def test_stuck_detection_keeps_lifetime_stats():
+    agent = ACCAAgent()
+    agent.reset({"initial_grid": _frame(1), "action_space": ["ACTION1", "ACTION2"]})
+    agent.stats.record("ACTION1", changed=True, novel=True)
+    agent._steps_since_novelty = 29
+    agent.last_action = "ACTION1"
+    agent._last_grid_hash = hash(_frame(1).tobytes())
+
+    agent.step(_frame(1))
+
+    assert agent.stats.action_calls["ACTION1"] >= 1
+
+
+def test_unsolved_rich_action_space_uses_macro_schedule():
+    agent = ACCAAgent()
+    agent.reset({
+        "initial_grid": _frame(1),
+        "action_space": ["ACTION1", "ACTION2", "ACTION3", "ACTION4", "ACTION7"],
+    })
+    assert agent.prev_tracked is not None
+
+    actions = []
+    for step in (0, 6, 12, 18, 24):
+        agent.actions_taken = step
+        actions.append(agent._scheduled_exploration_action(agent.prev_tracked))
+
+    assert actions == ["ACTION1", "ACTION2", "ACTION3", "ACTION4", "ACTION7"]
+
+
 def test_heuristic_push_action_passes_through_burst_suppression():
     frame = _push_target_frame()
     agent = ACCAAgent()

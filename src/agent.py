@@ -349,9 +349,7 @@ class ACCAAgent:
         else:
             self._steps_since_novelty += 1
             if self._steps_since_novelty >= STUCK_THRESHOLD:
-                self.stats = ExplorationStats()
                 self._useless_clicks.clear()
-                self._tried_clicks.clear()
                 self._steps_since_novelty = 0
         # Click-feedback: cells that didn't change the grid are useless this level.
         if self._last_click is not None and self._last_grid_hash is not None and not changed:
@@ -420,6 +418,9 @@ class ACCAAgent:
         learned_action = self._state_conditioned_action()
         if learned_action is not None and not self._base_suppressed(_base_action(learned_action)):
             return self._desuppress_action(learned_action)
+        scheduled_action = self._scheduled_exploration_action(state)
+        if scheduled_action is not None:
+            return self._desuppress_action(scheduled_action)
         push_action = self._push_toward_target_action()
         if push_action is not None:
             return self._desuppress_action(push_action)
@@ -458,6 +459,39 @@ class ACCAAgent:
         idx = self._play_idx_per_state.get(h, 0) % len(actions)
         self._play_idx_per_state[h] = idx + 1
         return actions[idx]
+
+    def _scheduled_exploration_action(self, state: ObjectGraph) -> str | None:
+        """Broad macro schedule for unsolved multi-action games.
+
+        Before any level has been completed for a game, per-action effectiveness
+        can prefer "movement" actions that generate many new frames without
+        solving. For rich keyboard/click action spaces, force a repeating macro
+        sweep so the budget samples every family instead of collapsing back to
+        ACTION1.
+        """
+        if self.memory.has_programs(self.game_id):
+            return None
+        bases = sorted({
+            _base_action(action)
+            for action in self.action_space
+            if _base_action(action) != "RESET"
+        })
+        if len(bases) <= 2 and ActionEnum.ACTION6.value not in bases:
+            return None
+
+        simple = [a for a in bases if a != ActionEnum.ACTION6.value]
+        click_slots = 4 if ActionEnum.ACTION6.value in bases else 0
+        simple_slots = len(simple) * 6
+        period = simple_slots + click_slots
+        if period <= 0:
+            return None
+
+        pos = self.actions_taken % period
+        if click_slots and pos >= simple_slots:
+            return self._coordinate_action(state)
+        if not simple:
+            return None
+        return simple[min(len(simple) - 1, pos // 6)]
 
     def _finish_step(self, curr_tracked: ObjectGraph, action) -> ActionEnum | str:
         action_text = str(action.value if isinstance(action, ActionEnum) else action)
@@ -502,6 +536,11 @@ class ACCAAgent:
         if learned_action is not None and not self._base_suppressed(_base_action(learned_action)):
             self.planner.last_predicted_state = None
             return self._desuppress_action(learned_action)
+
+        scheduled_action = self._scheduled_exploration_action(state)
+        if scheduled_action is not None:
+            self.planner.last_predicted_state = None
+            return self._desuppress_action(scheduled_action)
 
         push_action = self._push_toward_target_action()
         if push_action is not None:
