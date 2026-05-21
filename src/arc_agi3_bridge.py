@@ -22,7 +22,7 @@ import numpy as np
 from src.agent import ACCAAgent, MechanicMemory
 
 
-BRIDGE_VERSION = "2026-05-21-reward-v3"
+BRIDGE_VERSION = "2026-05-21-actionspace-v4"
 
 
 def _add_official_agent_paths() -> None:
@@ -548,6 +548,8 @@ class KaggleACCAAgent(_OfficialAgent):
             if status in {"GAME_OVER", "NOT_PLAYED"}:
                 self.last_action = "RESET"
                 return _to_game_action("RESET")
+        elif self.agent is not None:
+            self.agent.set_action_space(action_space)
 
         # GAME_OVER / NOT_PLAYED mid-game: send RESET to retry the level, but
         # KEEP the agent and its bank intact. GAME_OVER is a level-failure

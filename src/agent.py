@@ -325,6 +325,23 @@ class ACCAAgent:
     def act(self, observation: np.ndarray) -> ActionEnum | str:
         return self.step(observation)
 
+    def set_action_space(self, action_space: list[ActionEnum | str]) -> None:
+        """Update currently available actions from the ARC-AGI-3 frame.
+
+        ARC-AGI-3 can expose different actions across states. Keeping the reset
+        action space forever made the inner policy stale on games where ACTION6
+        dominates only part of the state machine.
+        """
+        current = [_canonical_action(action) for action in action_space]
+        if current == self.action_space:
+            return
+        self.action_space = current
+        self.program_candidates = self.memory.candidate_programs(
+            self.game_id, self.action_space
+        )
+        self.program_index = 0
+        self.program_pos = 0
+
     def step(self, frame: np.ndarray) -> ActionEnum | str:
         grid = _as_grid(frame)
         self.current_frame = grid.copy()

@@ -124,6 +124,24 @@ def test_kaggle_agent_resets_after_game_over_keeps_agent_alive():
     assert agent.agent is first_inner_agent
 
 
+def test_kaggle_agent_updates_inner_action_space_each_frame():
+    agent = KaggleACCAAgent()
+    frame = {"grid": [[1]], "game_id": "g", "state": "NOT_FINISHED", "action_space": ["ACTION6"]}
+    agent.choose_action([], frame)
+    assert agent.agent is not None
+    assert agent.agent.action_space == ["ACTION6"]
+
+    next_frame = {
+        "grid": [[1]],
+        "game_id": "g",
+        "state": "NOT_FINISHED",
+        "action_space": ["ACTION1", "ACTION2"],
+    }
+    agent.choose_action([], next_frame)
+
+    assert agent.agent.action_space == ["ACTION1", "ACTION2"]
+
+
 def test_click_targets_include_color_centroids_and_center():
     grid = np.zeros((8, 8), dtype=np.uint8)
     grid[1:3, 5:7] = 4

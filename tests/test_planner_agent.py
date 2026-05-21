@@ -190,6 +190,18 @@ def test_agent_canonicalizes_numeric_action_space():
     assert agent.action_space == ["ACTION1", "ACTION6", "RESET"]
 
 
+def test_agent_updates_action_space_after_reset():
+    memory = MechanicMemory()
+    memory.store_program("game", ["ACTION2"])
+    agent = ACCAAgent(memory=memory)
+    agent.reset({"game_id": "game", "initial_grid": _frame(1), "action_space": ["ACTION6"]})
+
+    agent.set_action_space(["ACTION1", "ACTION2"])
+
+    assert agent.action_space == ["ACTION1", "ACTION2"]
+    assert agent.program_candidates
+
+
 def test_agent_suppresses_long_same_action_bursts():
     agent = ACCAAgent()
     agent.reset({"initial_grid": _frame(1), "action_space": ["ACTION1", "ACTION2"]})
