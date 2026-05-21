@@ -87,12 +87,11 @@ def test_normalize_action_name_prefers_enum_name():
     assert _normalize_action_name(action) == "ACTION2"
 
 
-def test_kaggle_agent_resets_then_returns_actions():
+def test_kaggle_agent_acts_immediately_on_live_initial_frame():
     agent = KaggleACCAAgent()
     frame = {"grid": [[0, 14], [0, 0]], "game_id": "click", "action_space": ["RESET", "ACTION6"]}
 
-    assert agent.choose_action([], frame) == "RESET"
-    assert agent.choose_action([frame], frame) == "ACTION6 0 1"
+    assert agent.choose_action([], frame) == "ACTION6 0 1"
 
 
 def test_kaggle_agent_resets_after_game_over_keeps_agent_alive():

@@ -372,12 +372,35 @@ class KaggleACCAAgent(_OfficialAgent):
                 f"choose={1000 * cum_choose:.0f}ms total, step={1000 * cum_step:.0f}ms total)",
                 flush=True,
             )
+            # End-of-game diagnostic: action breakdown + learned-transition counts.
+            # This is the key signal we're missing — at end-of-game we should see
+            # what the agent was actually doing.
+            inner = getattr(self, "agent", None)
+            if inner is not None:
+                from collections import Counter
+                breakdown = Counter()
+                for a in getattr(inner, "level_actions", []):
+                    base = a.split()[0]
+                    breakdown[base] += 1
+                top = ", ".join(f"{a}={n}" for a, n in breakdown.most_common(8))
+                ntrans = sum(len(v) for v in getattr(inner, "_novel_transitions", {}).values())
+                nstates = len(getattr(inner, "_novel_transitions", {}))
+                print(
+                    f"[{self.game_id}] action breakdown: {top}",
+                    flush=True,
+                )
+                print(
+                    f"[{self.game_id}] learned transitions: {ntrans} novel actions across {nstates} states",
+                    flush=True,
+                )
 
         if hasattr(self, "cleanup"):
             self.cleanup()
 
     def _latest_frame_from_env(self) -> Any:
         raw = self.arc_env.observation_space
+        if raw is None and hasattr(self.arc_env, "reset"):
+            raw = self.arc_env.reset()
         if hasattr(self, "_convert_raw_frame_data"):
             return self._convert_raw_frame_data(raw)
         return raw
@@ -427,8 +450,9 @@ class KaggleACCAAgent(_OfficialAgent):
             self.probe_step = 0
             self.click_targets = _click_targets(grid)
             self._prev_signature = _frame_signature(grid)
-            self.last_action = "RESET"
-            return _to_game_action("RESET")
+            if status in {"GAME_OVER", "NOT_PLAYED"}:
+                self.last_action = "RESET"
+                return _to_game_action("RESET")
 
         # GAME_OVER / NOT_PLAYED mid-game: send RESET to retry the level, but
         # KEEP the agent and its bank intact. GAME_OVER is a level-failure
